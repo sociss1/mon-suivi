@@ -1713,7 +1713,9 @@ setTimeout(function(){
 <script>
 (function(){
   if('serviceWorker' in navigator&&location.protocol!=='file:'){
-    window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})});
+    var hadCtl=!!navigator.serviceWorker.controller,reloaded=false;
+    navigator.serviceWorker.addEventListener('controllerchange',function(){if(hadCtl&&!reloaded){reloaded=true;location.reload()}});
+    window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').then(function(r){try{r.update()}catch(e){}}).catch(function(){})});
   }
   var ev=null,btn=document.getElementById('install');
   window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();ev=e;if(btn)btn.hidden=false});

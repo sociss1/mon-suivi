@@ -963,15 +963,30 @@ function aiPrompt(dg){
 }
 function aiShim(){
   var u=nfGet('suivi:aiurl');if(!u)return null;
-  function err(c){var x=new Error(c);x.code=c;return x}
-  return {json:async function(prompt,o){
+  function err(c,m){var x=new Error(c);x.code=c;x.msg=m;return x}
+  var f=async function(prompt,o,mode){
     var r;
-    try{r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt}),signal:o&&o.signal})}
-    catch(e){if(e&&e.name==='AbortError')throw err('cancelled');throw e}
-    if(r.status===429)throw err('rate_limited');
-    if(!r.ok)throw err('http_'+r.status);
-    var j=await r.json();return j.out;
-  }};
+    try{r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt,mode:mode||'text'}),signal:o&&o.signal})}
+    catch(e){if(e&&e.name==='AbortError')throw err('cancelled');throw err('net','Le serveur est introuvable. Vérifie l\'adresse enregistrée, ou ta connexion.')}
+    if(r.status===429)throw err('rate_limited','Trop d\'essais. Réessaie plus tard.');
+    if(r.status===404)throw err('http','Adresse incorrecte : le serveur n\'existe pas à cette adresse.');
+    if(r.status===403)throw err('http','Le serveur refuse la demande. Vérifie que l\'adresse est la bonne.');
+    if(r.status===500)throw err('http','Le serveur n\'a pas d\'IA. Sur Cloudflare, ajoute « Workers AI » avec le nom AI dans Bindings.');
+    if(!r.ok)throw err('http','Le serveur n\'a pas reçu de réponse de l\'IA. Réessaie.');
+    return r.json();
+  };
+  var g=function(prompt,o){return f(prompt,o,'text')};
+  g.json=async function(prompt,o){var j=await f(prompt,o,'json');return j.out};
+  return g;
+}
+function askCard(){
+  var h='<section class="sec"><h2>Pose ta question</h2><p class="sub">Demande ce que tu veux sur ton argent, tes habitudes ou tes projets.</p><div class="card">'+
+    '<textarea class="in" id="ai-q" rows="3" maxlength="400" placeholder="Ex : combien puis-je mettre de côté ce mois-ci ?" style="width:100%;resize:none;box-sizing:border-box">'+esc(ui.qBusy?ui.qText:'')+'</textarea>'+
+    '<button type="button" class="btn" style="margin-top:12px;width:100%" data-act="ask"'+(ui.qBusy?' disabled':'')+'>'+(ui.qBusy?'L\'IA réfléchit…':'Envoyer')+'</button>';
+  if(ui.qErr)h+='<p class="sm" role="alert" style="color:var(--bad);margin:12px 0 0">'+esc(ui.qErr)+'</p>';
+  h+='</div>';
+  (ui.qa||[]).forEach(function(x){h+='<div class="card" style="margin-top:12px"><div class="sm" style="font-weight:600">'+esc(x.q)+'</div><p style="margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere">'+esc(x.a)+'</p></div>'});
+  return h+'</section>';
 }
 function aiChatPrompt(){
   var p=aiPrompt(DIAG||diagnose()),i=p.indexOf('Données :\n'),d=i>=0?p.slice(i):'';
@@ -993,7 +1008,7 @@ async function runAI(){
     else if(c==='not_granted'||c==='sampling_disabled'||c==='not_declared'||c==='capability_disabled'||c==='capability_removed'){SAMPLE=null;ui.aiErr='L\'IA n\'est pas autorisée ici. Le diagnostic automatique reste actif.'}
     else if(c==='rate_limited')ui.aiErr='Trop d\'essais ou limite d\'usage atteinte. Réessaie plus tard.';
     else if(c==='session_expired')ui.aiErr='Reconnecte-toi à Claude puis réessaie.';
-    else ui.aiErr='L\'IA n\'a pas pu répondre. Réessaie dans un moment.';
+    else ui.aiErr=(e&&e.msg)||'L\'IA n\'a pas pu répondre. Réessaie dans un moment.';
   }
   ui.aiBusy=false;ui.ctl=null;
   if(ui.tab==='coach')render(false);
@@ -1070,7 +1085,7 @@ function viewCoach(){
         '<div class="foot">'+(window.claude?'L\'IA utilise ton compte Claude.':'L\'IA passe par ton serveur IA.')+' Elle ne tourne que quand tu la demandes.'+(window.claude?'':' <span role="button" tabindex="0" data-act="aiclear" style="text-decoration:underline;cursor:pointer">Retirer le serveur</span>')+'</div>';
     }
   }
-  html+='</section>'+
+  html+='</section>'+(SAMPLE?askCard():'')+
     '<div class="foot" style="margin-top:26px">Le diagnostic se met à jour tout seul à chaque ajout et à chaque ouverture. Les alertes apparaissent sur la cloche en haut. Une application fermée ne peut pas envoyer de notification : pour ça, utilise aussi les rappels du téléphone.</div>';
   ui.freshAi=false;
   return html;
@@ -1176,6 +1191,21 @@ var ACTS={
       render(false);
     }
     try{var r=Notification.requestPermission(after);if(r&&r.then)r.then(after)}catch(e){toast('Notifications indisponibles ici')}
+  },
+  ask:async function(){
+    if(!SAMPLE||ui.qBusy)return;
+    var el=document.getElementById('ai-q'),q=el?el.value.trim():'';
+    if(q.length<3){toast('Écris ta question');return}
+    ui.qBusy=true;ui.qErr='';ui.qText=q;render(false);
+    try{
+      var p=aiPrompt(DIAG||diagnose()),i=p.indexOf('Données :\n'),d=i>=0?p.slice(i):'';
+      var pr='Tu es le coach personnel de '+(A().name||'l\'utilisateur')+'. Les montants sont en F CFA. Réponds à sa question en français simple, en le tutoyant, en 8 phrases maximum, en utilisant seulement ses données ci-dessous. N\'invente aucun chiffre et ne propose aucun placement risqué. Si les données ne suffisent pas, dis ce qu\'il faut ajouter.\n\nQuestion : '+q+'\n\n'+d;
+      var out=await SAMPLE(pr,{modelTier:'default'});
+      var txt=String(out&&out.text||'').trim();
+      if(!txt)throw new Error('vide');
+      ui.qa=[{q:q,a:txt}].concat(ui.qa||[]).slice(0,4);ui.qText='';
+    }catch(e){ui.qErr=(e&&e.msg)||(e&&e.code==='rate_limited'?'Trop d\'essais. Réessaie plus tard.':'L\'IA n\'a pas pu répondre. Réessaie dans un moment.')}
+    ui.qBusy=false;if(ui.tab==='coach')render(false);
   },
   hide:function(){HIDE=!HIDE;nfSet('suivi:hide',HIDE?'1':'0');render(false);toast(HIDE?'Montants masqués':'Montants affichés')},
   aisave:function(){

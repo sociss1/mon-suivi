@@ -20,8 +20,8 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     if (req.method !== 'POST' || req.headers.get('Origin') !== permis) return rep({ error: 'interdit' }, 403);
 
-    let prompt;
-    try { ({ prompt } = await req.json()); } catch { return rep({ error: 'requete invalide' }, 400); }
+    let prompt, mode;
+    try { ({ prompt, mode } = await req.json()); } catch { return rep({ error: 'requete invalide' }, 400); }
     if (typeof prompt !== 'string' || prompt.length < 20 || prompt.length > 8000) return rep({ error: 'requete invalide' }, 400);
 
     let texte = '';
@@ -54,9 +54,17 @@ export default {
       return rep({ error: 'ia' }, 502);
     }
 
+    if (mode === 'text') return rep({ text: texte.trim() });
+
     const a = texte.indexOf('{'), b = texte.lastIndexOf('}');
-    if (a < 0 || b <= a) return rep({ error: 'reponse incomplete' }, 502);
-    try { return rep({ out: JSON.parse(texte.slice(a, b + 1)) }); }
-    catch { return rep({ error: 'reponse incomplete' }, 502); }
+    if (a >= 0 && b > a) {
+      try {
+        const out = JSON.parse(texte.slice(a, b + 1));
+        if (out && Array.isArray(out.steps) && out.steps.length) return rep({ out });
+      } catch (e) { /* on retombe sur le texte brut */ }
+    }
+    const brut = texte.trim();
+    if (!brut) return rep({ error: 'reponse incomplete' }, 502);
+    return rep({ out: { verdict: brut.slice(0, 220), steps: [{ t: 'Conseil de l\'IA', d: brut }], projets: '', surveiller: '' } });
   },
 };

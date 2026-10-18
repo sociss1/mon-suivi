@@ -956,6 +956,11 @@ function aiPrompt(dg){
     'Règles : français simple, tutoiement, 3 à 5 étapes classées par priorité, aucun chiffre inventé (utilise seulement les données), aucun placement risqué, montants réalistes pour son revenu. Si les données manquent, dis-le dans le verdict.\n\n'+
     'Données :\n'+JSON.stringify(data);
 }
+function aiChatPrompt(){
+  var p=aiPrompt(DIAG||diagnose()),i=p.indexOf('Données :\n'),d=i>=0?p.slice(i):'';
+  return 'Tu es mon coach personnel. Les montants sont en F CFA et mon revenu peut varier d\'un mois à l\'autre. Analyse mon argent, mes habitudes et mes projets avec les données ci-dessous.\n\n'+
+    'Réponds en français simple, en me tutoyant : 1) un verdict en 2 phrases (ce qui est normal et ce qui ne l\'est pas), 2) 3 à 5 étapes classées par priorité avec des montants en F CFA, 3) le projet à avancer en premier et pourquoi, 4) une seule chose à surveiller cette semaine. N\'invente aucun chiffre et ne propose aucun placement risqué.\n\n'+d;
+}
 async function runAI(){
   if(!SAMPLE||ui.aiBusy)return;
   ui.aiBusy=true;ui.aiErr='';ui.ctl=new AbortController();
@@ -1022,6 +1027,10 @@ function viewCoach(){
   html+='<section class="sec"><h2>Avis de l\'IA</h2><p class="sub">Elle lit tout ton suivi et te dit quoi faire en priorité.</p>';
   if(SAMPLE===undefined){
     html+='<div class="card"><div class="skel" style="width:60%"></div></div>';
+  }else if(SAMPLE===null&&!(window.claude&&window.claude.use)){
+    html+='<div class="card"><p class="sm" style="margin:0 0 12px">Sur le site, l\'IA passe par ton application Claude. Le bouton envoie tout ton suivi à Claude, qui te répond avec ses conseils.</p>'+
+      '<button type="button" class="btn" style="width:100%" data-act="aichat">Demander l\'avis à Claude</button>'+
+      '<button type="button" class="btn ghost" style="width:100%;margin-top:10px" data-act="aicopy">Copier la demande</button></div>';
   }else if(SAMPLE===null){
     html+='<div class="card"><p class="sm" style="margin:0">'+esc(ui.aiErr||'L\'avis de l\'IA n\'est pas disponible sur ce site. Le diagnostic automatique ci-dessus reste actif.')+'</p></div>';
   }else{
@@ -1119,10 +1128,13 @@ setInterval(nfTick,60000);
 document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden')setTimeout(nfTick,1500)});
 function nfCard(){
   var p=nfPerm(),h='<section class="sec"><h2>Notifications</h2>';
-  if(p==='unsupported'){
-    h+='<div class="card"><p class="sm" style="margin:0">Les notifications ne sont pas disponibles ici. Sur iPhone : ouvre le site dans Safari, appuie sur Partager, puis « Sur l\'écran d\'accueil », et ouvre l\'application depuis son icône.</p></div>';
+  var ios=/iphone|ipad|ipod/i.test(navigator.userAgent),pwa=(navigator.standalone===true)||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches),frame=(window.top!==window);
+  if(frame){
+    h+='<div class="card"><p class="sm" style="margin:0">Les notifications ne marchent pas dans cette vue. Ouvre le site installé sur ton écran d\'accueil pour les activer.</p></div>';
+  }else if(p==='unsupported'){
+    h+='<div class="card"><p class="sm" style="margin:0">'+(ios&&!pwa?'Sur iPhone, les notifications marchent seulement depuis l\'icône sur l\'écran d\'accueil. Dans Safari, appuie sur Partager, puis « Sur l\'écran d\'accueil ». Ouvre ensuite Mon Suivi depuis son icône et reviens ici.':'Ton navigateur ne permet pas les notifications ici. Essaie avec Chrome, ou avec l\'application installée sur ton écran d\'accueil.')+'</p></div>';
   }else if(p==='denied'){
-    h+='<div class="card"><p class="sm" style="margin:0">Les notifications sont bloquées. Autorise-les dans les réglages du téléphone, rubrique Notifications, puis Mon Suivi (ou le navigateur).</p></div>';
+    h+='<div class="card"><p class="sm" style="margin:0">Les notifications sont bloquées. Ouvre les Réglages du téléphone, puis Notifications, choisis Mon Suivi (ou ton navigateur) et autorise-les. Reviens ensuite ici.</p></div>';
   }else if(nfOn()){
     h+='<div class="card"><p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">Activées.</b> Tu reçois un rappel à 8 h, à 20 h 30, et quand le Coach voit une alerte, si l\'application est ouverte en arrière-plan.</p>'+
       '<div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn" data-act="nftest">Tester</button><button type="button" class="btn ghost" data-act="nfoff">Désactiver</button></div></div>';
@@ -1141,6 +1153,7 @@ var ACTS={
       var p=nfPerm();
       if(p==='granted'){nfSet('suivi:notif','1');nfShow('Notifications activées','Tu recevras tes rappels ici.','test');toast('Notifications activées')}
       else if(p==='denied')toast('Notifications refusées');
+      else toast('Autorisation non donnée. Réessaie.');
       render(false);
     }
     try{var r=Notification.requestPermission(after);if(r&&r.then)r.then(after)}catch(e){toast('Notifications indisponibles ici')}
@@ -1239,6 +1252,14 @@ var ACTS={
   goalreset:function(){var g=A().goal;g.t=0;touch('app');render(false)},
   welcome:function(){showWelcome(true)},
   ai:function(){runAI()},
+  aichat:function(){
+    var q=aiChatPrompt();
+    try{window.open('https://claude.ai/new?q='+encodeURIComponent(q),'_blank','noopener')}catch(e){}
+  },
+  aicopy:function(){
+    var q=aiChatPrompt();
+    try{navigator.clipboard.writeText(q).then(function(){toast('Demande copiée. Colle-la dans Claude.')},function(){toast('Copie impossible')})}catch(e){toast('Copie impossible')}
+  },
   aistop:function(){if(ui.ctl)ui.ctl.abort()}
 };
 function onClick(e){

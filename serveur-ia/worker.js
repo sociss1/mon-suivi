@@ -1,5 +1,6 @@
-// Serveur IA de Mon Suivi (Cloudflare Worker).
-// Reçoit le suivi depuis l'application et renvoie l'avis de l'IA.
+// Serveur de Mon Suivi (Cloudflare Worker) : avis de l'IA + sauvegarde en ligne chiffrée.
+// - Sauvegarde : il faut le binding KV nommé SYNC (les données sont chiffrées dans l'application,
+//   le serveur ne peut pas les lire).
 // - Si la variable secrète ANTHROPIC_API_KEY existe : utilise Claude.
 // - Sinon : utilise Workers AI (gratuit, il faut ajouter le binding "AI").
 const MODELE_CLAUDE = 'claude-haiku-5-5';
@@ -20,8 +21,18 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     if (req.method !== 'POST' || req.headers.get('Origin') !== permis) return rep({ error: 'interdit' }, 403);
 
-    let prompt, mode;
-    try { ({ prompt, mode } = await req.json()); } catch { return rep({ error: 'requete invalide' }, 400); }
+    let body;
+    try { body = await req.json(); } catch { return rep({ error: 'requete invalide' }, 400); }
+    if (body && (body.op === 'put' || body.op === 'get')) {
+      if (!env.SYNC) return rep({ error: 'sauvegarde non configuree' }, 500);
+      if (typeof body.id !== 'string' || !/^[a-f0-9]{64}$/.test(body.id)) return rep({ error: 'requete invalide' }, 400);
+      const cle = 'u:' + body.id;
+      if (body.op === 'get') return rep({ data: await env.SYNC.get(cle) });
+      if (typeof body.data !== 'string' || body.data.length > 900000) return rep({ error: 'trop gros' }, 400);
+      await env.SYNC.put(cle, body.data);
+      return rep({ ok: true, t: Date.now() });
+    }
+    const { prompt, mode } = body || {};
     if (typeof prompt !== 'string' || prompt.length < 20 || prompt.length > 8000) return rep({ error: 'requete invalide' }, 400);
 
     let texte = '';

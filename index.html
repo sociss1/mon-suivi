@@ -305,6 +305,7 @@ ol.steps p{margin:2px 0 0;color:var(--muted);font-size:14.5px;overflow-wrap:anyw
 .lock .btn{width:100%;margin-top:10px}
 @keyframes lkin{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
 .lock .lk-in{animation:lkin .35s cubic-bezier(.2,.8,.2,1) both}
+.cdcode{font-family:var(--f-display);font-size:26px;font-weight:800;letter-spacing:.06em;text-align:center;padding:14px 10px;border-radius:18px;background:rgba(0,0,0,.28);border:1px dashed var(--edge);margin:4px 0 12px;user-select:all;-webkit-user-select:all;overflow-wrap:anywhere}
 @media (max-width:430px){.sync span:last-child{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 98px);z-index:40;max-width:calc(100% - 32px);padding:11px 20px;border-radius:99px;background:rgba(234,251,241,.96);color:#03210F;font-weight:700;font-size:14px;text-align:center;pointer-events:none;opacity:0;transform:translate(-50%,16px);box-shadow:0 18px 30px -12px rgba(0,0,0,.8)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
@@ -503,7 +504,7 @@ function load(key){
 }
 function A(){return load('app')}
 function M(k){return load('m-'+k)}
-function touch(key){lsSet(key,DOCS[key]);dirty.add(key);schedule()}
+function touch(key){lsSet(key,DOCS[key]);dirty.add(key);schedule();cdSchedule()}
 
 function setSync(s){
   syncState=s;
@@ -1138,7 +1139,7 @@ function viewCoach(){
   var att=dg.items.filter(function(x){return x.l==='bad'||x.l==='warn'}).sort(function(p,q){return (p.l==='bad'?0:1)-(q.l==='bad'?0:1)});
   var okk=dg.items.filter(function(x){return x.l==='ok'});
   var inf=dg.items.filter(function(x){return x.l==='info'});
-  var html=hero+nfCard()+lkCard()+bkCard();
+  var html=hero+nfCard()+lkCard()+cdCard()+bkCard();
   html+='<section class="sec"><div class="grp"><h2>À corriger</h2><span class="cnt">'+att.length+'</span></div>'+(att.length?'<div style="margin-top:8px">'+insList(att,0)+'</div>':'<div class="empty">Rien d\'anormal pour l\'instant.</div>')+'</section>';
   if(okk.length)html+='<section class="sec"><div class="grp"><h2>Normal</h2><span class="cnt">'+okk.length+'</span></div><div style="margin-top:8px">'+insList(okk,att.length)+'</div></section>';
   if(inf.length)html+='<section class="sec"><div class="grp"><h2>Conseils</h2><span class="cnt">'+inf.length+'</span></div><div style="margin-top:8px">'+insList(inf,att.length+okk.length)+'</div></section>';
@@ -1281,6 +1282,97 @@ function nfCard(){
   return h+'</section>';
 }
 
+/* ---------- sauvegarde en ligne chiffrée (via ton serveur) + fichier ---------- */
+var CD={keys:{},timer:null,busy:false};
+function cdAvail(){return !(window.claude&&window.claude.use)}
+function cdUrl(){return nfGet('suivi:aiurl')||''}
+function cdState(){return lsGet('cloud')}
+function cdNorm(c){return String(c||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
+function cdGen(){
+  var A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',r=crypto.getRandomValues(new Uint8Array(12)),o='',i;
+  for(i=0;i<12;i++){o+=A[r[i]%32];if(i%4===3&&i<11)o+='-'}
+  return o;
+}
+async function cdKeys(code){
+  var n=cdNorm(code);if(CD.keys[n])return CD.keys[n];
+  var enc=new TextEncoder(),km=await crypto.subtle.importKey('raw',enc.encode(n),'PBKDF2',false,['deriveBits']);
+  var bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode('mon-suivi-sauvegarde-v1'),iterations:150000,hash:'SHA-256'},km,512);
+  var u=new Uint8Array(bits),key=await crypto.subtle.importKey('raw',u.slice(0,32),'AES-GCM',false,['encrypt','decrypt']);
+  var id=Array.prototype.map.call(u.slice(32),function(b){return ('0'+b.toString(16)).slice(-2)}).join('');
+  return CD.keys[n]={key:key,id:id};
+}
+function cdGather(){
+  var docs={},i,k;
+  try{for(i=0;i<localStorage.length;i++){k=localStorage.key(i);if(/^suivi:(app|m-\d{4}-\d{2})$/.test(k))docs[k.slice(6)]=JSON.parse(localStorage.getItem(k))}}catch(e){}
+  return docs;
+}
+function cdApply(docs){
+  var i,k,del=[];
+  try{
+    for(i=0;i<localStorage.length;i++){k=localStorage.key(i);if(/^suivi:(app|m-\d{4}-\d{2})$/.test(k))del.push(k)}
+    del.forEach(function(x){localStorage.removeItem(x)});
+    Object.keys(docs).forEach(function(d){if(/^(app|m-\d{4}-\d{2})$/.test(d))localStorage.setItem('suivi:'+d,JSON.stringify(docs[d]))});
+  }catch(e){throw new Error('apply')}
+}
+async function cdCall(body){
+  var u=cdUrl();if(!u)throw new Error('url');
+  var r;try{r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}catch(e){throw new Error('net')}
+  if(r.status===500)throw new Error('kv');
+  if(!r.ok)throw new Error('http');
+  return r.json();
+}
+async function cdPush(){
+  var c=cdState();if(!c||!c.code||!cdUrl())return false;
+  var K=await cdKeys(c.code),iv=crypto.getRandomValues(new Uint8Array(12));
+  var plain=new TextEncoder().encode(JSON.stringify({v:1,t:Date.now(),docs:cdGather()}));
+  var ct=await crypto.subtle.encrypt({name:'AES-GCM',iv:iv},K.key,plain);
+  await cdCall({op:'put',id:K.id,data:JSON.stringify({iv:lkB64(iv),c:lkB64(ct)})});
+  c.at=Date.now();lsSet('cloud',c);return true;
+}
+function cdSchedule(){
+  var c=cdState();if(!c||!c.code)return;
+  clearTimeout(CD.timer);
+  CD.timer=setTimeout(function(){cdPush().then(function(){if(ui.tab==='coach')render(false)}).catch(function(){})},6000);
+}
+async function cdFetch(code){
+  var K=await cdKeys(code),j=await cdCall({op:'get',id:K.id});
+  if(!j.data)throw new Error('none');
+  var o=JSON.parse(j.data),pt;
+  try{pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:lkUn(o.iv)},K.key,lkUn(o.c))}catch(e){throw new Error('code')}
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+function cdMsg(e){
+  var m=e&&e.message;
+  return m==='url'?'Enregistre d\'abord l\'adresse du serveur (section Avis de l\'IA).':
+    m==='net'?'Le serveur est introuvable. Vérifie ta connexion.':
+    m==='kv'?'Le serveur n\'a pas la sauvegarde. Sur Cloudflare, ajoute le binding KV nommé SYNC.':
+    m==='none'?'Aucune sauvegarde trouvée avec ce code.':
+    m==='code'?'Code incorrect.':
+    'La sauvegarde a échoué. Réessaie.';
+}
+function cdDate(t){return t?new Date(t).toLocaleString('fr-FR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'jamais'}
+function cdCard(){
+  if(!cdAvail())return '';
+  var c=cdState(),on=!!(c&&c.code),url=!!cdUrl();
+  var h='<section class="sec"><h2>Sauvegarde en ligne</h2><div class="card">';
+  if(on){
+    h+='<p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">Sauvegarde en ligne activée.</b> Tes données sont chiffrées avant de partir : seul ton code peut les lire. Dernière sauvegarde : '+cdDate(c.at)+'.</p>';
+    if(ui.cdShow)h+='<div class="cdcode" role="status">'+esc(c.code)+'</div><p class="sm" style="margin:0 0 12px">Note ce code en lieu sûr. Sans lui, personne ne peut retrouver tes données, même pas moi.</p>';
+    h+='<div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn"'+(CD.busy?' disabled':'')+' data-act="cdnow">'+(CD.busy?'Un instant…':'Sauvegarder')+'</button><button type="button" class="btn ghost" data-act="cdshow">'+(ui.cdShow?'Cacher mon code':'Voir mon code')+'</button></div>'+
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px"><button type="button" class="link" data-act="cdpull">Restaurer la sauvegarde</button><button type="button" class="link" data-act="cdoff">Désactiver</button></div>';
+  }else{
+    h+='<p class="sm" style="margin:0 0 12px">Sans sauvegarde, tes données restent seulement sur ce téléphone. Si tu changes de téléphone ou si tu effaces Safari, tout est perdu.</p>';
+    if(url){
+      h+='<button type="button" class="btn" style="width:100%"'+(CD.busy?' disabled':'')+' data-act="cdon">'+(CD.busy?'Un instant…':'Activer la sauvegarde en ligne')+'</button>'+
+        '<p class="sm" style="margin:16px 0 8px">Tu as déjà un code (nouveau téléphone) ?</p>'+
+        '<div class="aiurl"><input class="in" id="cd-code" autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX-XXXX"><button type="button" class="btn ghost" data-act="cdrestore">Restaurer</button></div>';
+    }else h+='<p class="sm" style="margin:0 0 4px">Pour la sauvegarde en ligne, enregistre d\'abord l\'adresse du serveur dans la section « Avis de l\'IA ».</p>';
+  }
+  if(ui.cdErr)h+='<p class="sm" role="alert" style="color:var(--bad);margin:12px 0 0">'+esc(ui.cdErr)+'</p>';
+  h+='</div></section>';
+  return h;
+}
+
 /* ---------- verrouillage Face ID (WebAuthn, local) ---------- */
 var LK={ok:!!(window.PublicKeyCredential&&window.top===window&&navigator.credentials),hiddenAt:0};
 if(LK.ok&&PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable){
@@ -1406,6 +1498,39 @@ var ACTS={
     if(ok){toast('Sauvegarde prête');render(false)}
   },
   bkimp:function(){var el=document.getElementById('bk-file');if(el)el.click()},
+  cdshow:function(){ui.cdShow=!ui.cdShow;render(false)},
+  cdon:async function(){
+    if(CD.busy)return;CD.busy=true;ui.cdErr='';render(false);
+    try{lsSet('cloud',{code:cdGen(),at:0});await cdPush();ui.cdShow=true;toast('Sauvegarde activée')}
+    catch(e){lsSet('cloud',null);ui.cdErr=cdMsg(e)}
+    CD.busy=false;render(false);
+  },
+  cdnow:async function(){
+    if(CD.busy)return;CD.busy=true;ui.cdErr='';render(false);
+    try{await cdPush();toast('Sauvegardé')}catch(e){ui.cdErr=cdMsg(e)}
+    CD.busy=false;render(false);
+  },
+  cdrestore:async function(){
+    var el=document.getElementById('cd-code'),code=el?el.value:'';
+    if(cdNorm(code).length!==12){ui.cdErr='Le code a 12 lettres et chiffres.';render(false);return}
+    if(CD.busy)return;CD.busy=true;ui.cdErr='';render(false);
+    try{
+      var d=await cdFetch(code);
+      cdApply(d.docs||{});lsSet('cloud',{code:cdNorm(code).replace(/(.{4})(?=.)/g,'$1-'),at:d.t||Date.now()});
+      toast('Données restaurées');setTimeout(function(){location.reload()},500);return;
+    }catch(e){ui.cdErr=cdMsg(e)}
+    CD.busy=false;render(false);
+  },
+  cdpull:async function(){
+    var c=cdState();if(!c||!c.code)return;
+    if(!window.confirm('Remplacer les données de ce téléphone par la dernière sauvegarde ?'))return;
+    try{var d=await cdFetch(c.code);cdApply(d.docs||{});toast('Données restaurées');setTimeout(function(){location.reload()},500)}
+    catch(e){ui.cdErr=cdMsg(e);render(false)}
+  },
+  cdoff:function(){
+    if(!window.confirm('Désactiver la sauvegarde en ligne ? Tes données restent sur ce téléphone.'))return;
+    lsSet('cloud',null);ui.cdShow=false;toast('Sauvegarde désactivée');render(false);
+  },
   lkon:async function(){
     try{await lkEnable();toast('Verrouillage activé')}catch(e){toast('Activation annulée')}
     render(false);

@@ -15,3 +15,11 @@ Il est gratuit à héberger sur Cloudflare.
 6. Dans l'application : onglet **Coach** > colle l'adresse dans « Serveur IA » > **Enregistrer**.
 
 Seul le site `https://sociss1.github.io` peut appeler ce serveur.
+
+## Sauvegarde en ligne (optionnel)
+
+1. Sur Cloudflare : **Workers & Pages** > `mon-suivi-ia` > **Settings** > **Bindings** > **Add** > **KV namespace**.
+2. Nom de la variable : `SYNC`. Choisis l'espace `mon-suivi-sauvegarde`, puis **Deploy**.
+3. Dans l'application : onglet **Coach** > **Sauvegarde en ligne** > **Activer**. Note le code affiché.
+
+Les données sont chiffrées dans l'application avant l'envoi : le serveur ne peut pas les lire.

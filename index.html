@@ -297,6 +297,14 @@ ol.steps p{margin:2px 0 0;color:var(--muted);font-size:14.5px;overflow-wrap:anyw
 .mst b{display:block;font-family:var(--f-display);font-size:19px;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;margin-top:2px}
 .mgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;font-size:14px}
 .mgrid span{color:var(--muted)}.mgrid b{display:block;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.lock{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:24px;text-align:center;background:radial-gradient(80% 50% at 50% 0%,rgba(70,210,120,.4),transparent 70%),radial-gradient(70% 45% at 100% 100%,rgba(20,130,75,.3),transparent 70%),#04140C}
+.lock .lk-in{display:flex;flex-direction:column;align-items:center;gap:14px;max-width:340px}
+.lock svg{width:96px;height:96px;filter:drop-shadow(0 16px 24px rgba(50,220,110,.4))}
+.lock h2{font-family:var(--f-display);font-size:26px;margin:6px 0 0;letter-spacing:-.02em}
+.lock p{margin:0;color:var(--muted)}
+.lock .btn{width:100%;margin-top:10px}
+@keyframes lkin{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+.lock .lk-in{animation:lkin .35s cubic-bezier(.2,.8,.2,1) both}
 @media (max-width:430px){.sync span:last-child{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 98px);z-index:40;max-width:calc(100% - 32px);padding:11px 20px;border-radius:99px;background:rgba(234,251,241,.96);color:#03210F;font-weight:700;font-size:14px;text-align:center;pointer-events:none;opacity:0;transform:translate(-50%,16px);box-shadow:0 18px 30px -12px rgba(0,0,0,.8)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
@@ -1124,7 +1132,7 @@ function viewCoach(){
   var att=dg.items.filter(function(x){return x.l==='bad'||x.l==='warn'}).sort(function(p,q){return (p.l==='bad'?0:1)-(q.l==='bad'?0:1)});
   var okk=dg.items.filter(function(x){return x.l==='ok'});
   var inf=dg.items.filter(function(x){return x.l==='info'});
-  var html=hero+nfCard();
+  var html=hero+nfCard()+lkCard();
   html+='<section class="sec"><div class="grp"><h2>À corriger</h2><span class="cnt">'+att.length+'</span></div>'+(att.length?'<div style="margin-top:8px">'+insList(att,0)+'</div>':'<div class="empty">Rien d\'anormal pour l\'instant.</div>')+'</section>';
   if(okk.length)html+='<section class="sec"><div class="grp"><h2>Normal</h2><span class="cnt">'+okk.length+'</span></div><div style="margin-top:8px">'+insList(okk,att.length)+'</div></section>';
   if(inf.length)html+='<section class="sec"><div class="grp"><h2>Conseils</h2><span class="cnt">'+inf.length+'</span></div><div style="margin-top:8px">'+insList(inf,att.length+okk.length)+'</div></section>';
@@ -1267,8 +1275,76 @@ function nfCard(){
   return h+'</section>';
 }
 
+/* ---------- verrouillage Face ID (WebAuthn, local) ---------- */
+var LK={ok:!!(window.PublicKeyCredential&&window.top===window&&navigator.credentials),hiddenAt:0};
+if(LK.ok&&PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable){
+  PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(function(v){if(!v){LK.ok=false;if(typeof ui!=='undefined'&&ui.tab==='coach')render(false)}}).catch(function(){});
+}
+function lkB64(b){var u=new Uint8Array(b),s2='',i;for(i=0;i<u.length;i++)s2+=String.fromCharCode(u[i]);return btoa(s2).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function lkUn(t){t=t.replace(/-/g,'+').replace(/_/g,'/');while(t.length%4)t+='=';var s2=atob(t),u=new Uint8Array(s2.length),i;for(i=0;i<s2.length;i++)u[i]=s2.charCodeAt(i);return u}
+function lkRnd(n){return crypto.getRandomValues(new Uint8Array(n))}
+function lkOn(){return !!nfGet('suivi:lock')}
+async function lkEnable(){
+  var cred=await navigator.credentials.create({publicKey:{challenge:lkRnd(32),rp:{name:'Mon Suivi'},user:{id:lkRnd(16),name:'mon-suivi',displayName:'Mon Suivi'},
+    pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+    authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required',residentKey:'discouraged'},timeout:60000,attestation:'none'}});
+  nfSet('suivi:lock',lkB64(cred.rawId));
+}
+async function lkAssert(){
+  var id=nfGet('suivi:lock');if(!id)return;
+  await navigator.credentials.get({publicKey:{challenge:lkRnd(32),allowCredentials:[{type:'public-key',id:lkUn(id),transports:['internal','hybrid']}],userVerification:'required',timeout:60000}});
+}
+function lkHide(){var el=document.getElementById('lock');if(el)el.hidden=true;document.documentElement.classList.remove('locked')}
+async function lkTry(){
+  var m=document.getElementById('lkmsg');if(m)m.textContent='';
+  try{await lkAssert();lkHide()}catch(e){if(m)m.textContent='Je n\'ai pas pu te reconnaître. Réessaie.'}
+}
+function lkShow(){
+  if(!lkOn())return;
+  var el=document.getElementById('lock');
+  if(!el){
+    el=document.createElement('div');el.id='lock';el.className='lock';el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');el.setAttribute('aria-label','Mon Suivi est verrouillé');
+    el.innerHTML='<div class="lk-in"><svg viewBox="0 0 120 120" aria-hidden="true"><use href="#logo"/></svg><h2>Mon Suivi est verrouillé</h2><p>Tes données sont protégées.</p><button type="button" class="btn" id="lkgo">Déverrouiller avec Face ID</button><p class="sm" id="lkmsg" role="status"></p></div>';
+    document.body.appendChild(el);
+    document.getElementById('lkgo').addEventListener('click',lkTry);
+  }
+  el.hidden=false;document.documentElement.classList.add('locked');
+  setTimeout(lkTry,350);
+}
+function lkInit(){
+  if(lkOn())lkShow();
+  document.addEventListener('visibilitychange',function(){
+    if(!lkOn())return;
+    if(document.visibilityState==='hidden')LK.hiddenAt=Date.now();
+    else if(LK.hiddenAt&&Date.now()-LK.hiddenAt>15000){LK.hiddenAt=0;lkShow()}
+  });
+}
+function lkCard(){
+  var h='<section class="sec"><h2>Verrouillage</h2>';
+  if(!LK.ok){
+    h+='<div class="card"><p class="sm" style="margin:0">'+(window.top!==window?'Le verrouillage n\'est pas disponible dans cette vue. Ouvre le site installé sur ton écran d\'accueil.':'Ton appareil ne permet pas le verrouillage par Face ID ou empreinte ici.')+'</p></div>';
+  }else if(lkOn()){
+    h+='<div class="card"><p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">Activé.</b> L\'application demande ton visage à l\'ouverture, et après 15 secondes passées en arrière-plan.</p>'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn" data-act="lknow">Verrouiller</button><button type="button" class="btn ghost" data-act="lkoff">Désactiver</button></div></div>';
+  }else{
+    h+='<div class="card"><p class="sm" style="margin:0 0 12px">Protège tes chiffres avec Face ID (ou ton empreinte, ou le code du téléphone).</p>'+
+      '<button type="button" class="btn" style="width:100%" data-act="lkon">Activer le verrouillage Face ID</button></div>';
+  }
+  return h+'</section>';
+}
+lkInit();
+
 /* ---------- actions ---------- */
 var ACTS={
+  lkon:async function(){
+    try{await lkEnable();toast('Verrouillage activé')}catch(e){toast('Activation annulée')}
+    render(false);
+  },
+  lkoff:async function(){
+    try{await lkAssert();nfSet('suivi:lock','');toast('Verrouillage désactivé')}catch(e){toast('Désactivation annulée')}
+    render(false);
+  },
+  lknow:function(){lkShow()},
   nfon:function(){
     if(!NF.ok){toast('Notifications indisponibles ici');render(false);return}
     function after(){

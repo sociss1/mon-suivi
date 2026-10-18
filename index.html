@@ -306,6 +306,24 @@ ol.steps p{margin:2px 0 0;color:var(--muted);font-size:14.5px;overflow-wrap:anyw
 @keyframes lkin{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
 .lock .lk-in{animation:lkin .35s cubic-bezier(.2,.8,.2,1) both}
 .cdcode{font-family:var(--f-display);font-size:26px;font-weight:800;letter-spacing:.06em;text-align:center;padding:14px 10px;border-radius:18px;background:rgba(0,0,0,.28);border:1px dashed var(--edge);margin:4px 0 12px;user-select:all;-webkit-user-select:all;overflow-wrap:anywhere}
+@media (min-width:980px){
+  .wrap{max-width:1060px;padding-block:30px 150px}
+  .top{margin-bottom:26px}
+  .hello h1,#greet{font-size:44px}
+  #main{column-count:2;column-gap:30px}
+  #main>*{break-inside:avoid;-webkit-column-break-inside:avoid}
+  #main>.hero,#main>.monthbar{column-span:all}
+  #main>.sec{margin:0 0 30px}
+  #main>.hero,#main>.monthbar{margin-bottom:30px}
+  .nav-in{max-width:620px}
+}
+@media (min-width:1500px){.wrap{max-width:1180px}}
+@media (hover:hover){
+  .chip:hover,.sq:hover,.eye:hover,.link:hover{filter:brightness(1.18)}
+  .btn:hover{filter:brightness(1.06)}
+  .nav button:hover{color:var(--ink)}
+  .proj-head:hover b{color:var(--mint-hi)}
+}
 @media (max-width:430px){.sync span:last-child{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 98px);z-index:40;max-width:calc(100% - 32px);padding:11px 20px;border-radius:99px;background:rgba(234,251,241,.96);color:#03210F;font-weight:700;font-size:14px;text-align:center;pointer-events:none;opacity:0;transform:translate(-50%,16px);box-shadow:0 18px 30px -12px rgba(0,0,0,.8)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
@@ -1708,6 +1726,14 @@ function onClick(e){
   if(f)f(b,prev);
 }
 main.addEventListener('click',onClick);
+document.addEventListener('keydown',function(e){
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  var t=e.target,tg=t&&t.tagName;
+  if(tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT'||(t&&t.isContentEditable))return;
+  var el=document.getElementById('lock');if(el&&!el.hidden)return;
+  var i='12345'.indexOf(e.key);
+  if(i>=0&&e.key.length===1)ACTS.tab({dataset:{v:TABS[i]}});
+});
 document.querySelector('.nav').addEventListener('click',function(e){if(e.detail>0&&Date.now()-lastScrub<600)return;onClick(e)});
 document.querySelector('.top').addEventListener('click',onClick);
 

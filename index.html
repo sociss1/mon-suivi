@@ -288,6 +288,10 @@ ol.steps p{margin:2px 0 0;color:var(--muted);font-size:14.5px;overflow-wrap:anyw
   .nav button svg{transition:transform .3s cubic-bezier(.3,1.7,.5,1)}
   .toast{transition:opacity .25s,transform .35s cubic-bezier(.3,1.4,.5,1),bottom .45s cubic-bezier(.3,1.2,.4,1)}
 }
+.eye{position:absolute;top:14px;right:14px;z-index:3;width:40px;height:40px;border-radius:14px;border:1px solid rgba(3,33,15,.18);background:rgba(255,255,255,.34);color:var(--on-mint);display:grid;place-items:center;cursor:pointer;padding:0;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:transform .2s,background .2s}
+.eye:active{transform:scale(.9)}
+.eye svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.aiurl{display:flex;gap:8px;margin-top:10px}.aiurl .in{flex:1;min-width:0}
 @media (max-width:430px){.sync span:last-child{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 98px);z-index:40;max-width:calc(100% - 32px);padding:11px 20px;border-radius:99px;background:rgba(234,251,241,.96);color:#03210F;font-weight:700;font-size:14px;text-align:center;pointer-events:none;opacity:0;transform:translate(-50%,16px);box-shadow:0 18px 30px -12px rgba(0,0,0,.8)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
@@ -433,7 +437,8 @@ function mk(s){return s.slice(0,7)}
 function parse(s){var p=s.split('-').map(Number);return new Date(p[0],p[1]-1,p[2])}
 function addDays(s,n){var d=parse(s);d.setDate(d.getDate()+n);return ds(d)}
 function T(){return ds(new Date())}
-function fmt(n){return Math.round(n).toLocaleString('fr-FR')+' F'}
+var HIDE=(function(){try{return localStorage.getItem('suivi:hide')==='1'}catch(e){return false}})();
+function fmt(n){return HIDE?'•••• F':Math.round(n).toLocaleString('fr-FR')+' F'}
 function num(v){return parseInt(String(v).replace(/[^\d]/g,''),10)||0}
 function clone(o){return JSON.parse(JSON.stringify(o))}
 function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
@@ -532,7 +537,7 @@ async function pull(key){
 }
 async function connect(){
   try{
-    if(!window.claude||!window.claude.use){SAMPLE=null;setSync('local');if(ui.tab==='coach')render(false);return}
+    if(!window.claude||!window.claude.use){SAMPLE=aiShim();setSync('local');if(ui.tab==='coach')render(false);return}
     var res=await Promise.all([window.claude.use('db'),window.claude.use('user')]);
     var db=res[0],user=res[1];
     try{SAMPLE=await window.claude.use('sample')}catch(e){SAMPLE=null}
@@ -761,12 +766,12 @@ function viewBud(){
 
   return '<div class="monthbar"><button type="button" class="sq" data-act="month" data-d="-1" aria-label="Mois précédent">'+ICON_CHEV_L+'</button><b>'+label+'</b>'+
     '<button type="button" class="sq" data-act="month" data-d="1" aria-label="Mois suivant"'+(key>=now?' disabled':'')+'>'+ICON_CHEV_R+'</button></div>'+
-    '<div class="hero"><div class="sm">Reste à dépenser</div><div class="reste">'+(reste<0?'−':'')+'<span data-count="'+Math.abs(reste)+'" data-f="f">'+fmt(Math.abs(reste))+'</span></div>'+
+    '<div class="hero"><button type="button" class="eye" data-act="hide" aria-pressed="'+HIDE+'" aria-label="'+(HIDE?'Afficher les montants':'Masquer les montants')+'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'+(HIDE?'<path d="M3 3l18 18"/>':'')+'</svg></button><div class="sm">Reste à dépenser</div><div class="reste">'+(reste<0?'−':'')+'<span data-count="'+Math.abs(reste)+'" data-f="f">'+fmt(Math.abs(reste))+'</span></div>'+
     '<div class="bar" aria-hidden="true"><b class="'+(reste<0?'over':'')+'" style="width:'+pct+'%"></b></div>'+
     '<div class="kv"><span>Dépensé <b>'+fmt(dep)+'</b></span><span>Revenu du mois <b>'+fmt(base)+'</b></span></div>'+
     (perDay?'<div class="kv"><span>'+perDay+'</span></div>':'')+
     (reste<0?'<span class="warn">Tu dépasses ton budget</span>':'')+
-    '<div class="income"><label for="income-input">Revenu prévu</label><input class="in" id="income-input" data-in="income" inputmode="numeric" value="'+inc+'" aria-describedby="income-hint"></div>'+
+    '<div class="income"><label for="income-input">Revenu prévu</label><input class="in" id="income-input" data-in="income" type="'+(HIDE?'password':'text')+'" inputmode="numeric" value="'+inc+'" aria-describedby="income-hint"></div>'+
     '<div class="sm" id="income-hint" style="margin-top:6px">Modifiable. Si tu reçois plus que prévu, le revenu du mois suit.</div></div>'+
 
     '<section class="sec"><h2>Ajouter une opération</h2>'+
@@ -956,6 +961,18 @@ function aiPrompt(dg){
     'Règles : français simple, tutoiement, 3 à 5 étapes classées par priorité, aucun chiffre inventé (utilise seulement les données), aucun placement risqué, montants réalistes pour son revenu. Si les données manquent, dis-le dans le verdict.\n\n'+
     'Données :\n'+JSON.stringify(data);
 }
+function aiShim(){
+  var u=nfGet('suivi:aiurl');if(!u)return null;
+  function err(c){var x=new Error(c);x.code=c;return x}
+  return {json:async function(prompt,o){
+    var r;
+    try{r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt}),signal:o&&o.signal})}
+    catch(e){if(e&&e.name==='AbortError')throw err('cancelled');throw e}
+    if(r.status===429)throw err('rate_limited');
+    if(!r.ok)throw err('http_'+r.status);
+    var j=await r.json();return j.out;
+  }};
+}
 function aiChatPrompt(){
   var p=aiPrompt(DIAG||diagnose()),i=p.indexOf('Données :\n'),d=i>=0?p.slice(i):'';
   return 'Tu es mon coach personnel. Les montants sont en F CFA et mon revenu peut varier d\'un mois à l\'autre. Analyse mon argent, mes habitudes et mes projets avec les données ci-dessous.\n\n'+
@@ -1028,7 +1045,9 @@ function viewCoach(){
   if(SAMPLE===undefined){
     html+='<div class="card"><div class="skel" style="width:60%"></div></div>';
   }else if(SAMPLE===null&&!(window.claude&&window.claude.use)){
-    html+='<div class="card"><p class="sm" style="margin:0 0 12px">Sur le site, l\'IA passe par ton application Claude. Le bouton envoie tout ton suivi à Claude, qui te répond avec ses conseils.</p>'+
+    html+='<div class="card"><p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">Serveur IA</b> : colle ici l\'adresse de ton serveur IA pour que l\'avis s\'affiche directement dans l\'application.</p>'+
+      '<div class="aiurl"><input class="in" id="ai-url" inputmode="url" autocapitalize="off" autocomplete="off" placeholder="https://….workers.dev"><button type="button" class="btn" data-act="aisave">Enregistrer</button></div>'+
+      '<p class="sm" style="margin:16px 0 12px">Sans serveur, tu peux envoyer ton suivi à Claude et lire sa réponse là-bas.</p>'+
       '<button type="button" class="btn" style="width:100%" data-act="aichat">Demander l\'avis à Claude</button>'+
       '<button type="button" class="btn ghost" style="width:100%;margin-top:10px" data-act="aicopy">Copier la demande</button></div>';
   }else if(SAMPLE===null){
@@ -1048,7 +1067,7 @@ function viewCoach(){
       }
       if(ui.aiErr)html+='<p class="sm" role="alert" style="color:var(--bad);margin:12px 0 0">'+esc(ui.aiErr)+'</p>';
       html+='<button type="button" class="btn" style="margin-top:14px;width:100%" data-act="ai">'+(ai?'Actualiser l\'avis':'Demander l\'avis de l\'IA')+'</button>'+
-        '<div class="foot">L\'IA utilise ton compte Claude. Elle ne tourne que quand tu la demandes.</div>';
+        '<div class="foot">'+(window.claude?'L\'IA utilise ton compte Claude.':'L\'IA passe par ton serveur IA.')+' Elle ne tourne que quand tu la demandes.'+(window.claude?'':' <span role="button" tabindex="0" data-act="aiclear" style="text-decoration:underline;cursor:pointer">Retirer le serveur</span>')+'</div>';
     }
   }
   html+='</section>'+
@@ -1158,6 +1177,13 @@ var ACTS={
     }
     try{var r=Notification.requestPermission(after);if(r&&r.then)r.then(after)}catch(e){toast('Notifications indisponibles ici')}
   },
+  hide:function(){HIDE=!HIDE;nfSet('suivi:hide',HIDE?'1':'0');render(false);toast(HIDE?'Montants masqués':'Montants affichés')},
+  aisave:function(){
+    var el=document.getElementById('ai-url'),v=el?el.value.trim():'';
+    if(!/^https:\/\/[^\s]+$/i.test(v)){toast('Adresse invalide. Elle commence par https://');return}
+    nfSet('suivi:aiurl',v);SAMPLE=aiShim();toast('Serveur IA enregistré');render(false);
+  },
+  aiclear:function(){nfSet('suivi:aiurl','');SAMPLE=null;ui.ai=null;toast('Serveur IA retiré');render(false)},
   nfoff:function(){nfSet('suivi:notif','0');toast('Notifications désactivées');render(false)},
   nftest:function(){nfShow('Mon Suivi','Ceci est une notification de test.','test').then(function(ok){toast(ok?'Notification envoyée':'Impossible d\'envoyer')})},
   tab:function(b){

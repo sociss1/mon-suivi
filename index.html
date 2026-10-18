@@ -999,7 +999,7 @@ function viewCoach(){
   var att=dg.items.filter(function(x){return x.l==='bad'||x.l==='warn'}).sort(function(p,q){return (p.l==='bad'?0:1)-(q.l==='bad'?0:1)});
   var okk=dg.items.filter(function(x){return x.l==='ok'});
   var inf=dg.items.filter(function(x){return x.l==='info'});
-  var html=hero;
+  var html=hero+nfCard();
   html+='<section class="sec"><div class="grp"><h2>À corriger</h2><span class="cnt">'+att.length+'</span></div>'+(att.length?'<div style="margin-top:8px">'+insList(att,0)+'</div>':'<div class="empty">Rien d\'anormal pour l\'instant.</div>')+'</section>';
   if(okk.length)html+='<section class="sec"><div class="grp"><h2>Normal</h2><span class="cnt">'+okk.length+'</span></div><div style="margin-top:8px">'+insList(okk,att.length)+'</div></section>';
   if(inf.length)html+='<section class="sec"><div class="grp"><h2>Conseils</h2><span class="cnt">'+inf.length+'</span></div><div style="margin-top:8px">'+insList(inf,att.length+okk.length)+'</div></section>';
@@ -1043,7 +1043,7 @@ function viewCoach(){
     }
   }
   html+='</section>'+
-    '<div class="foot" style="margin-top:26px">Le diagnostic se met à jour tout seul à chaque ajout et à chaque ouverture. Les alertes apparaissent sur la cloche en haut. L\'application ne peut pas t\'envoyer de notification quand elle est fermée.</div>';
+    '<div class="foot" style="margin-top:26px">Le diagnostic se met à jour tout seul à chaque ajout et à chaque ouverture. Les alertes apparaissent sur la cloche en haut. Une application fermée ne peut pas envoyer de notification : pour ça, utilise aussi les rappels du téléphone.</div>';
   ui.freshAi=false;
   return html;
 }
@@ -1083,8 +1083,70 @@ function celebrate(){
   else burstAt(window.innerWidth/2,window.innerHeight/3,38);
 }
 
+/* ---------- notifications (locales, sans serveur) ---------- */
+var NF={ok:('Notification' in window)};
+function nfPerm(){try{return NF.ok?Notification.permission:'unsupported'}catch(e){return 'unsupported'}}
+function nfGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function nfSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+function nfOn(){return nfPerm()==='granted'&&nfGet('suivi:notif')==='1'}
+function nfShow(title,body,tag){
+  if(nfPerm()!=='granted')return Promise.resolve(false);
+  var o={body:body,tag:tag||'suivi',icon:'icon-192.png',badge:'icon-192.png',data:{url:'./'}};
+  function fb(){try{new Notification(title,o);return true}catch(e){return false}}
+  try{
+    if(navigator.serviceWorker&&navigator.serviceWorker.getRegistration){
+      return navigator.serviceWorker.getRegistration().then(function(r){
+        return (r&&r.showNotification)?r.showNotification(title,o).then(function(){return true}):fb();
+      }).catch(fb);
+    }
+  }catch(e){}
+  return Promise.resolve(fb());
+}
+function nfTick(){
+  if(!nfOn()||document.visibilityState==='visible')return;
+  var n=new Date(),hm=n.getHours()*60+n.getMinutes(),t=T();
+  var slots=[[480,'am','Bonjour','Choisis tes 3 priorités du jour.'],[1230,'pm','Fin de journée','Note tes dépenses et regarde le Coach.']];
+  slots.forEach(function(s){
+    var k='suivi:nf:'+t+':'+s[1];
+    if(hm>=s[0]&&hm<s[0]+120&&!nfGet(k)){nfSet(k,'1');nfShow(s[2],s[3],'slot-'+s[1])}
+  });
+  if(DIAG&&DIAG.alerts>0){
+    var ka='suivi:nf:'+t+':al'+DIAG.alerts;
+    if(!nfGet(ka)){nfSet(ka,'1');nfShow('Coach : '+DIAG.alerts+' alerte'+(DIAG.alerts>1?'s':''),'Ouvre Mon Suivi pour voir ce qui est anormal.','alerts')}
+  }
+}
+setInterval(nfTick,60000);
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden')setTimeout(nfTick,1500)});
+function nfCard(){
+  var p=nfPerm(),h='<section class="sec"><h2>Notifications</h2>';
+  if(p==='unsupported'){
+    h+='<div class="card"><p class="sm" style="margin:0">Les notifications ne sont pas disponibles ici. Sur iPhone : ouvre le site dans Safari, appuie sur Partager, puis « Sur l\'écran d\'accueil », et ouvre l\'application depuis son icône.</p></div>';
+  }else if(p==='denied'){
+    h+='<div class="card"><p class="sm" style="margin:0">Les notifications sont bloquées. Autorise-les dans les réglages du téléphone, rubrique Notifications, puis Mon Suivi (ou le navigateur).</p></div>';
+  }else if(nfOn()){
+    h+='<div class="card"><p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">Activées.</b> Tu reçois un rappel à 8 h, à 20 h 30, et quand le Coach voit une alerte, si l\'application est ouverte en arrière-plan.</p>'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn" data-act="nftest">Tester</button><button type="button" class="btn ghost" data-act="nfoff">Désactiver</button></div></div>';
+  }else{
+    h+='<div class="card"><p class="sm" style="margin:0 0 12px">Reçois un rappel le matin, le soir, et quand le Coach voit une alerte.</p>'+
+      '<button type="button" class="btn" style="width:100%" data-act="nfon">Activer les notifications</button></div>';
+  }
+  return h+'</section>';
+}
+
 /* ---------- actions ---------- */
 var ACTS={
+  nfon:function(){
+    if(!NF.ok){toast('Notifications indisponibles ici');render(false);return}
+    function after(){
+      var p=nfPerm();
+      if(p==='granted'){nfSet('suivi:notif','1');nfShow('Notifications activées','Tu recevras tes rappels ici.','test');toast('Notifications activées')}
+      else if(p==='denied')toast('Notifications refusées');
+      render(false);
+    }
+    try{var r=Notification.requestPermission(after);if(r&&r.then)r.then(after)}catch(e){toast('Notifications indisponibles ici')}
+  },
+  nfoff:function(){nfSet('suivi:notif','0');toast('Notifications désactivées');render(false)},
+  nftest:function(){nfShow('Mon Suivi','Ceci est une notification de test.','test').then(function(ok){toast(ok?'Notification envoyée':'Impossible d\'envoyer')})},
   tab:function(b){
     showNav();
     ui.tab=b.dataset.v;ui.open=null;

@@ -955,6 +955,12 @@ function diagnose(){
     if(tt.profit>0)add('ok','Ton import rapporte','Bénéfice réalisé : '+fmt(tt.profit)+' sur '+fmt(tt.rev)+' de ventes. Remets une partie dans un nouvel achat et garde le reste.');
   }
 
+  /* sauvegarde */
+  if(!window.claude&&(stk.length||m.tx.length)){
+    var lb=nfGet('suivi:lastbackup'),dsb=lb?Math.round((parse(t)-parse(lb))/864e5):999;
+    if(dsb>=30)add('info',lb?'Dernière sauvegarde il y a '+dsb+' jours':'Fais une sauvegarde de tes données','Tes données sont seulement sur ce téléphone. Va dans Coach, section Sauvegarde, pour en garder une copie.');
+  }
+
   /* habitudes */
   var hs=a.habits;
   if(hs.length){
@@ -1132,7 +1138,7 @@ function viewCoach(){
   var att=dg.items.filter(function(x){return x.l==='bad'||x.l==='warn'}).sort(function(p,q){return (p.l==='bad'?0:1)-(q.l==='bad'?0:1)});
   var okk=dg.items.filter(function(x){return x.l==='ok'});
   var inf=dg.items.filter(function(x){return x.l==='info'});
-  var html=hero+nfCard()+lkCard();
+  var html=hero+nfCard()+lkCard()+bkCard();
   html+='<section class="sec"><div class="grp"><h2>À corriger</h2><span class="cnt">'+att.length+'</span></div>'+(att.length?'<div style="margin-top:8px">'+insList(att,0)+'</div>':'<div class="empty">Rien d\'anormal pour l\'instant.</div>')+'</section>';
   if(okk.length)html+='<section class="sec"><div class="grp"><h2>Normal</h2><span class="cnt">'+okk.length+'</span></div><div style="margin-top:8px">'+insList(okk,att.length)+'</div></section>';
   if(inf.length)html+='<section class="sec"><div class="grp"><h2>Conseils</h2><span class="cnt">'+inf.length+'</span></div><div style="margin-top:8px">'+insList(inf,att.length+okk.length)+'</div></section>';
@@ -1334,8 +1340,72 @@ function lkCard(){
 }
 lkInit();
 
+/* ---------- sauvegarde des données ---------- */
+function bkKeys(){
+  var ks={app:1},i,k;
+  try{for(i=0;i<localStorage.length;i++){k=localStorage.key(i);if(k&&k.indexOf('suivi:m-')===0)ks[k.slice(6)]=1}}catch(e){}
+  Object.keys(DOCS).forEach(function(d){if(d==='app'||d.indexOf('m-')===0)ks[d]=1});
+  return Object.keys(ks);
+}
+function bkBuild(){
+  var data={};
+  bkKeys().forEach(function(k){var v=load(k);if(v)data[k]=v});
+  return {monSuivi:1,date:new Date().toISOString(),data:data};
+}
+async function bkExport(){
+  var txt=JSON.stringify(bkBuild()),name='mon-suivi-sauvegarde-'+T()+'.json';
+  var file;
+  try{file=new File([txt],name,{type:'application/json'})}catch(e){file=null}
+  try{
+    if(file&&navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:'Sauvegarde Mon Suivi'});
+      nfSet('suivi:lastbackup',T());return true;
+    }
+  }catch(e){if(e&&e.name==='AbortError')return false}
+  var a=document.createElement('a'),u=URL.createObjectURL(new Blob([txt],{type:'application/json'}));
+  a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(function(){URL.revokeObjectURL(u)},4000);
+  nfSet('suivi:lastbackup',T());return true;
+}
+function bkImport(file){
+  if(!file)return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var j;
+    try{j=JSON.parse(String(rd.result))}catch(e){toast('Fichier illisible');return}
+    if(!j||j.monSuivi!==1||!j.data||!j.data.app||!Array.isArray(j.data.app.habits)){toast('Ce fichier n\'est pas une sauvegarde Mon Suivi');return}
+    var n=Object.keys(j.data).filter(function(k){return k.indexOf('m-')===0}).length;
+    if(!confirm('Remplacer tes données actuelles par cette sauvegarde ('+n+' mois) ? Cette action ne peut pas être annulée.'))return;
+    Object.keys(j.data).forEach(function(k){
+      if(k!=='app'&&k.indexOf('m-')!==0)return;
+      DOCS[k]=j.data[k];touch(k);
+    });
+    ui.open=null;ui.sopen=null;render(true);toast('Sauvegarde restaurée');
+  };
+  rd.onerror=function(){toast('Fichier illisible')};
+  rd.readAsText(file);
+}
+function bkCard(){
+  var last=nfGet('suivi:lastbackup'),h='<section class="sec"><h2>Sauvegarde</h2>';
+  h+='<div class="card"><p class="sm" style="margin:0 0 12px">'+(window.claude?'Tes données sont enregistrées avec ton compte Claude. Tu peux aussi en garder une copie.':'Tes données sont seulement sur ce téléphone. Si tu supprimes l\'icône ou effaces les données de Safari, elles disparaissent. Fais une copie de temps en temps.')+'</p>'+
+    '<p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">'+(last?'Dernière sauvegarde : '+esc(parse(last).toLocaleDateString('fr-FR',{day:'numeric',month:'long'})):'Aucune sauvegarde pour l\'instant.')+'</b></p>'+
+    '<button type="button" class="btn" style="width:100%" data-act="bkexp">Sauvegarder mes données</button>'+
+    '<button type="button" class="btn ghost" style="width:100%;margin-top:10px" data-act="bkimp">Restaurer une sauvegarde</button>'+
+    '<input type="file" id="bk-file" accept=".json,application/json" hidden></div></section>';
+  return h;
+}
+document.addEventListener('change',function(e){
+  var t=e.target;
+  if(t&&t.id==='bk-file'){var fl=t.files&&t.files[0];t.value='';bkImport(fl)}
+});
+
 /* ---------- actions ---------- */
 var ACTS={
+  bkexp:async function(){
+    var ok=await bkExport();
+    if(ok){toast('Sauvegarde prête');render(false)}
+  },
+  bkimp:function(){var el=document.getElementById('bk-file');if(el)el.click()},
   lkon:async function(){
     try{await lkEnable();toast('Verrouillage activé')}catch(e){toast('Activation annulée')}
     render(false);

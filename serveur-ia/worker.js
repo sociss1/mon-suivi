@@ -3,7 +3,7 @@
 // - Si la variable secrète ANTHROPIC_API_KEY existe : utilise Claude.
 // - Sinon : utilise Workers AI (gratuit, il faut ajouter le binding "AI").
 const MODELE_CLAUDE = 'claude-haiku-5-5';
-const MODELE_CF = '@cf/meta/llama-3.1-8b-instruct';
+const MODELES_CF = ['@cf/meta/llama-3.1-8b-instruct', '@cf/meta/llama-3.1-8b-instruct-fast', '@cf/meta/llama-3.2-3b-instruct'];
 
 export default {
   async fetch(req, env) {
@@ -45,13 +45,21 @@ export default {
         const j = await r.json();
         texte = (j.content || []).map((c) => c.text || '').join('');
       } else if (env.AI) {
-        const j = await env.AI.run(MODELE_CF, { messages: [{ role: 'user', content: prompt }], max_tokens: 1200 });
-        texte = j.response || '';
+        let derniere = '';
+        for (const m of MODELES_CF) {
+          try {
+            const j = await env.AI.run(m, { messages: [{ role: 'user', content: prompt }], max_tokens: 1200 });
+            texte = (typeof j.response === 'string' ? j.response : JSON.stringify(j.response || '')) || '';
+            if (texte.trim()) break;
+            derniere = m + ' : reponse vide';
+          } catch (e) { derniere = m + ' : ' + String((e && e.message) || e); }
+        }
+        if (!texte.trim()) return rep({ error: 'ia', detail: derniere.slice(0, 300) }, 502);
       } else {
         return rep({ error: 'non configure' }, 500);
       }
     } catch (e) {
-      return rep({ error: 'ia' }, 502);
+      return rep({ error: 'ia', detail: String((e && e.message) || e).slice(0, 300) }, 502);
     }
 
     if (mode === 'text') return rep({ text: texte.trim() });

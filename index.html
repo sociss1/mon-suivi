@@ -972,7 +972,7 @@ function aiShim(){
     if(r.status===404)throw err('http','Adresse incorrecte : le serveur n\'existe pas à cette adresse.');
     if(r.status===403)throw err('http','Le serveur refuse la demande. Vérifie que l\'adresse est la bonne.');
     if(r.status===500)throw err('http','Le serveur n\'a pas d\'IA. Sur Cloudflare, ajoute « Workers AI » avec le nom AI dans Bindings.');
-    if(!r.ok)throw err('http','Le serveur n\'a pas reçu de réponse de l\'IA. Réessaie.');
+    if(!r.ok){var dt='';try{dt=(await r.json()).detail||''}catch(e){}throw err('http','Le serveur n\'a pas reçu de réponse de l\'IA.'+(dt?' Détail : '+dt:' Réessaie.'))}
     return r.json();
   };
   var g=function(prompt,o){return f(prompt,o,'text')};

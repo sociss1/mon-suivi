@@ -1387,11 +1387,11 @@ function bkImport(file){
 }
 function bkCard(){
   var last=nfGet('suivi:lastbackup'),h='<section class="sec"><h2>Sauvegarde</h2>';
-  h+='<div class="card"><p class="sm" style="margin:0 0 12px">'+(window.claude?'Tes données sont enregistrées avec ton compte Claude. Tu peux aussi en garder une copie.':'Tes données sont seulement sur ce téléphone. Si tu supprimes l\'icône ou effaces les données de Safari, elles disparaissent. Fais une copie de temps en temps.')+'</p>'+
-    '<p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">'+(last?'Dernière sauvegarde : '+esc(parse(last).toLocaleDateString('fr-FR',{day:'numeric',month:'long'})):'Aucune sauvegarde pour l\'instant.')+'</b></p>'+
-    '<button type="button" class="btn" style="width:100%" data-act="bkexp">Sauvegarder mes données</button>'+
+  h+='<div class="card"><p class="sm" style="margin:0 0 12px">'+(window.claude?'Tes données sont enregistrées avec ton compte Claude. Pour une copie à garder, ouvre le site installé sur ton téléphone.':'Tes données sont seulement sur ce téléphone. Si tu supprimes l\'icône ou effaces les données de Safari, elles disparaissent. Fais une copie de temps en temps.')+'</p>'+
+    (window.claude?'':'<p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">'+(last?'Dernière sauvegarde : '+esc(parse(last).toLocaleDateString('fr-FR',{day:'numeric',month:'long'})):'Aucune sauvegarde pour l\'instant.')+'</b></p>')+
+    (window.claude?'</div></section>':'<button type="button" class="btn" style="width:100%" data-act="bkexp">Sauvegarder mes données</button>'+
     '<button type="button" class="btn ghost" style="width:100%;margin-top:10px" data-act="bkimp">Restaurer une sauvegarde</button>'+
-    '<input type="file" id="bk-file" accept=".json,application/json" hidden></div></section>';
+    '<input type="file" id="bk-file" accept=".json,application/json" hidden></div></section>');
   return h;
 }
 document.addEventListener('change',function(e){

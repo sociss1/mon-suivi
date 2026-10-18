@@ -292,6 +292,11 @@ ol.steps p{margin:2px 0 0;color:var(--muted);font-size:14.5px;overflow-wrap:anyw
 .eye:active{transform:scale(.9)}
 .eye svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .aiurl{display:flex;gap:8px;margin-top:10px}.aiurl .in{flex:1;min-width:0}
+.mst{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.mst>div{padding:14px;border-radius:20px;border:1px solid var(--edge);background:var(--glass);box-shadow:var(--glass-sh);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.mst b{display:block;font-family:var(--f-display);font-size:19px;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;margin-top:2px}
+.mgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;font-size:14px}
+.mgrid span{color:var(--muted)}.mgrid b{display:block;font-weight:700;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 @media (max-width:430px){.sync span:last-child{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 98px);z-index:40;max-width:calc(100% - 32px);padding:11px 20px;border-radius:99px;background:rgba(234,251,241,.96);color:#03210F;font-weight:700;font-size:14px;text-align:center;pointer-events:none;opacity:0;transform:translate(-50%,16px);box-shadow:0 18px 30px -12px rgba(0,0,0,.8)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
@@ -444,9 +449,10 @@ function clone(o){return JSON.parse(JSON.stringify(o))}
 function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
 function J(i){return ' style="--j:'+i+'"'}
 
-var CATS_DEP=['Transport','Nourriture','Crédit & data','Loyer & charges','Famille','Santé','Loisirs','Épargne','Autre'];
+var CATS_DEP=['Transport','Nourriture','Crédit & data','Loyer & charges','Famille','Santé','Loisirs','Marchandises','Épargne','Autre'];
 var CATS_REV=['Client','Autre revenu'];
 var STAGES=['Idée','Prépa','En cours','Lancé'];
+var STOCK_ST=['Commandé','En route','Reçu'];
 var MOODS=['Dur','Bof','Ça va','Bien','Top'];
 var WD=['D','L','M','M','J','V','S'];
 var TABS=['jour','hab','bud','proj','coach'];
@@ -788,6 +794,53 @@ function viewBud(){
     '<section class="sec"><h2>Objectif d\'épargne</h2><div style="margin-top:10px">'+goalHtml+'</div></section>';
 }
 
+function S(){var a=A();return a.stock||(a.stock=[])}
+function sc(x){
+  var q=Math.max(1,x.q||1),total=(x.q||0)*(x.u||0)+(x.f||0),unit=total/q,sold=Math.min(x.sold||0,q),p=x.p||0;
+  return {total:total,unit:unit,sold:sold,left:q-sold,p:p,margin:p-unit,mpct:p>0?(p-unit)/p:0,rev:sold*p,profit:sold*(p-unit),frozen:(q-sold)*unit};
+}
+function stockTotals(){
+  var t={inv:0,rev:0,profit:0,frozen:0,n:0};
+  S().forEach(function(x){var c=sc(x);t.inv+=c.total;t.rev+=c.rev;t.profit+=c.profit;t.frozen+=c.frozen;t.n++});
+  return t;
+}
+function viewStock(){
+  var st=S(),T0=stockTotals();
+  var h='<section class="sec"><h2>Import Chine</h2><p class="sub">Note chaque achat. Il est ajouté tout seul à tes dépenses, et l\'IA s\'en sert pour te conseiller.</p>';
+  if(st.length){
+    h+='<div class="mst"><div><span class="sm">Investi</span><b>'+fmt(T0.inv)+'</b></div><div><span class="sm">Ventes encaissées</span><b>'+fmt(T0.rev)+'</b></div>'+
+       '<div><span class="sm">Bénéfice réalisé</span><b style="color:'+(T0.profit<0?'var(--bad)':'var(--mint-hi)')+'">'+(T0.profit<0?'−':'')+fmt(Math.abs(T0.profit))+'</b></div><div><span class="sm">Argent en stock</span><b>'+fmt(T0.frozen)+'</b></div></div>';
+    h+='<ul class="cards" style="margin-top:12px">'+st.map(function(x,i){
+      var c=sc(x),open=ui.sopen===x.id,cf=ui.confirm==='sdel:'+x.id;
+      var head='<button type="button" class="proj-head" data-act="sopen" data-id="'+x.id+'" aria-expanded="'+open+'"><span style="min-width:0"><b>'+esc(x.n)+'</b><div class="proj-next">Vendu '+c.sold+' sur '+(x.q||0)+(c.p>0?' · marge '+pctS(c.mpct):' · prix de vente à fixer')+'</div></span><span class="pill">'+STOCK_ST[x.st||0]+'</span></button>'+
+        '<div class="bar" aria-hidden="true" style="margin-top:10px"><b style="width:'+(x.q?Math.min(100,c.sold/x.q*100):0)+'%"></b></div>';
+      var ed='';
+      if(open){
+        ed='<div class="edit'+(ui.sopening===x.id?' opening':'')+'">'+
+          '<div class="mgrid"><div><span>Coût total</span><b>'+fmt(c.total)+'</b></div><div><span>Coût par pièce</span><b>'+fmt(c.unit)+'</b></div>'+
+          '<div><span>Marge par pièce</span><b style="color:'+(c.margin<0?'var(--bad)':'inherit')+'">'+(c.margin<0?'−':'')+fmt(Math.abs(c.margin))+'</b></div><div><span>Bénéfice réalisé</span><b>'+(c.profit<0?'−':'')+fmt(Math.abs(c.profit))+'</b></div>'+
+          '<div><span>Reste en stock</span><b>'+c.left+' pièce'+(c.left>1?'s':'')+'</b></div><div><span>Valeur du stock</span><b>'+fmt(c.frozen)+'</b></div></div>'+
+          '<label class="fld"><span>Prix de vente par pièce (F CFA)</span><input class="in" data-in="sp" data-id="'+x.id+'" inputmode="numeric" value="'+(x.p||'')+'" placeholder="Ex : 5 000" autocomplete="off"></label>'+
+          '<div><div class="sm" style="font-weight:600;margin-bottom:6px">Où est la marchandise</div><div class="chips">'+STOCK_ST.map(function(s2,k){return '<button type="button" class="chip" data-act="sstage" data-id="'+x.id+'" data-v="'+k+'" aria-pressed="'+((x.st||0)===k)+'">'+s2+'</button>'}).join('')+'</div></div>'+
+          '<div><div class="sm" style="font-weight:600;margin-bottom:6px">Enregistrer des ventes</div><div class="chips"><button type="button" class="chip" data-act="ssell" data-id="'+x.id+'" data-n="1"'+(c.left<1?' disabled':'')+'>+ 1 vendue</button><button type="button" class="chip" data-act="ssell" data-id="'+x.id+'" data-n="5"'+(c.left<1?' disabled':'')+'>+ 5 vendues</button><button type="button" class="chip" data-act="ssell" data-id="'+x.id+'" data-n="'+c.left+'"'+(c.left<2?' disabled':'')+'>Tout vendu</button></div>'+
+          '<div class="sm" style="margin-top:6px">Chaque vente est ajoutée à tes revenus du mois.</div></div>'+
+          '<div style="display:flex;justify-content:space-between;gap:8px"><button type="button" class="link" data-act="sopen" data-id="'+x.id+'">Fermer</button>'+
+          '<button type="button" class="link'+(cf?' danger':'')+'" data-act="sdel" data-id="'+x.id+'">'+(cf?'Confirmer la suppression':'Supprimer')+'</button></div></div>';
+      }
+      return '<li class="proj'+frc('stock:'+x.id)+'"'+J(i)+'>'+head+ed+'</li>';
+    }).join('')+'</ul>';
+  }else h+='<div class="empty">Aucun achat noté pour l\'instant.</div>';
+  h+='<form class="form card" data-form="stock" style="margin-top:12px"><b style="font-weight:700">Nouvel achat</b>'+
+    '<label class="fld"><span>Produit</span><input class="in" id="st-n" placeholder="Ex : Montres connectées" autocomplete="off"></label>'+
+    '<div class="two"><label class="fld"><span>Quantité</span><input class="in" id="st-q" inputmode="numeric" placeholder="20" autocomplete="off"></label>'+
+    '<label class="fld"><span>Prix d\'achat par pièce (F CFA)</span><input class="in" id="st-u" inputmode="numeric" placeholder="3 500" autocomplete="off"></label></div>'+
+    '<div class="two"><label class="fld"><span>Transport et douane, au total (F CFA)</span><input class="in" id="st-f" inputmode="numeric" placeholder="40 000" autocomplete="off"></label>'+
+    '<label class="fld"><span>Prix de vente par pièce (F CFA)</span><input class="in" id="st-p" inputmode="numeric" placeholder="9 000" autocomplete="off"></label></div>'+
+    '<button class="btn" type="submit">Ajouter l\'achat</button></form>'+
+    '<button type="button" class="btn ghost" style="width:100%;margin-top:12px" data-act="askprod">Idées de produits à acheter (IA)</button>'+
+    '</section>';
+  return h;
+}
 function viewProj(){
   var ps=A().projects;
   var counts=STAGES.map(function(_,i){return ps.filter(function(p){return p.stage===i}).length});
@@ -812,7 +865,7 @@ function viewProj(){
     }
     return '<li class="proj'+frc('proj:'+p.id)+'"'+J(pi)+'>'+head+edit+'</li>';
   }).join('');
-  return hero+'<section class="sec"><h2>'+STAGES[ui.pf]+'</h2>'+
+  return hero+viewStock()+'<section class="sec"><h2>'+STAGES[ui.pf]+'</h2>'+
     '<p class="sub">'+(hasSug?'Les lignes marquées Suggestion sont des idées de départ. Garde-les, modifie-les ou supprime-les.':'Suis chaque projet de l\'idée jusqu\'au lancement.')+'</p>'+
     (shown.length?'<ul class="cards" style="margin-top:0">'+rows+'</ul>':'<div class="empty">Aucun projet à cette étape.</div>')+
     '<form class="add" data-form="proj"><input class="in" id="proj-input" placeholder="Nouveau projet ou idée" autocomplete="off" aria-label="Nouveau projet"><button class="btn" type="submit">Ajouter</button></form></section>';
@@ -875,6 +928,24 @@ function diagnose(){
     }
   }else add('info','Fixe un objectif d\'épargne chiffré','Un objectif sans montant ne se suit pas. Ajoute-le en bas de l\'onglet Budget.');
   if(base>0)add('info','Si ton revenu varie, prévois sur le bas','Calcule ton budget sur le montant le plus bas que tu peux recevoir. Quand tu gagnes plus, mets la différence dans l\'épargne ou dans un projet.');
+
+  /* import Chine */
+  var stk=(a.stock||[]);
+  if(stk.length){
+    var tt=stockTotals(),lowM=[],noP=[],slow=[];
+    stk.forEach(function(x){
+      var c=sc(x);
+      if(!x.p)noP.push(x.n);
+      else if(c.mpct<.25)lowM.push(x.n+' ('+pctS(c.mpct)+')');
+      if(x.st===2&&c.sold===0&&x.d&&Math.round((parse(t)-parse(x.d))/864e5)>=14)slow.push(x.n);
+    });
+    if(lowM.length)add('warn','Marge trop faible : '+lowM.slice(0,2).join(', '),'Après transport et douane, il reste moins de 25 % du prix de vente. Vise au moins 30 %, sinon monte le prix ou négocie le prix d\'achat.');
+    if(noP.length)add('info','Fixe un prix de vente pour '+noP.slice(0,2).join(', '),'Sans prix de vente, je ne peux pas calculer ta marge ni ton bénéfice.');
+    if(slow.length)add('warn',slow.slice(0,2).join(', ')+' ne se vend pas','Reçu depuis plus de 2 semaines et rien de vendu. Baisse un peu le prix, fais une promo ou publie-le chaque jour avant de racheter.');
+    if(base>0&&tt.frozen>base*.5)add('warn','Beaucoup d\'argent bloqué en stock : '+fmt(tt.frozen),'C\'est plus de la moitié de ton revenu du mois. Vends ce stock avant de recommander.');
+    else if(tt.frozen>0)add('info','Argent en stock : '+fmt(tt.frozen),'Cet argent revient quand tu vends. Note chaque vente pour suivre ton bénéfice.');
+    if(tt.profit>0)add('ok','Ton import rapporte','Bénéfice réalisé : '+fmt(tt.profit)+' sur '+fmt(tt.rev)+' de ventes. Remets une partie dans un nouvel achat et garde le reste.');
+  }
 
   /* habitudes */
   var hs=a.habits;
@@ -952,10 +1023,11 @@ function aiPrompt(dg){
     objectifEpargne:a.goal.t>0?{nom:a.goal.n,cible:a.goal.t,misDeCote:a.goal.s}:null,
     habitudes:hs.map(function(h){var d7=0;for(var j=0;j<7;j++)if(h.log[addDays(t,-j)])d7++;return {nom:h.n,serieEnCours:streak(h),faitSur7Jours:d7}}),
     projets:a.projects.map(function(p){return {nom:p.n,etape:STAGES[p.stage],prochaineEtape:p.next||''}}),
+    marchandisesImportees:S().map(function(x){var c=sc(x);return {produit:x.n,quantite:x.q,prixAchatPiece:x.u,fraisTransportDouane:x.f||0,coutParPiece:Math.round(c.unit),prixVentePiece:x.p||null,vendues:c.sold,reste:c.left,etat:STOCK_ST[x.st||0],margePourcent:x.p?Math.round(c.mpct*100):null}}),
     alertesAutomatiques:dg.items.filter(function(x){return x.l==='bad'||x.l==='warn'}).map(function(x){return x.t})
   };
   return 'Tu es le coach personnel de '+(a.name||'l\'utilisateur')+'. Les montants sont en F CFA. Son revenu peut varier d\'un mois à l\'autre. '+
-    'Voici toutes ses données du jour en JSON. Analyse son argent, ses habitudes et ses projets.\n\n'+
+    'Voici toutes ses données du jour en JSON. Analyse son argent, ses habitudes, ses projets et ses marchandises importées de Chine pour les revendre.\n\n'+
     'Réponds uniquement par un objet JSON de cette forme :\n'+
     '{"verdict":"2 phrases : ce qui est normal et ce qui ne l\'est pas, sans détour","steps":[{"t":"titre court","d":"1 à 2 phrases, avec des montants en F CFA quand c\'est utile"}],"projets":"1 à 2 phrases : quel projet avancer en premier et pourquoi","surveiller":"une seule chose à surveiller cette semaine"}\n\n'+
     'Règles : français simple, tutoiement, 3 à 5 étapes classées par priorité, aucun chiffre inventé (utilise seulement les données), aucun placement risqué, montants réalistes pour son revenu. Si les données manquent, dis-le dans le verdict.\n\n'+
@@ -979,8 +1051,24 @@ function aiShim(){
   g.json=async function(prompt,o){var j=await f(prompt,o,'json');return j.out};
   return g;
 }
+async function askAI(q,long){
+  if(!SAMPLE||ui.qBusy)return;
+  ui.qBusy=true;ui.qErr='';ui.qText=q;render(false);
+  setTimeout(function(){var e=document.getElementById('ask-sec');if(e&&e.scrollIntoView)e.scrollIntoView({behavior:REDUCED?'auto':'smooth',block:'start'})},60);
+  try{
+    var p=aiPrompt(DIAG||diagnose()),i=p.indexOf('Données :\n'),d=i>=0?p.slice(i):'';
+    var pr='Tu es le coach personnel de '+(A().name||'l\'utilisateur')+'. Les montants sont en F CFA. Réponds à sa question en français simple, en le tutoyant, en '+(long?'20 lignes':'8 phrases')+' maximum. '+
+      (long?'Appuie-toi sur ses données ci-dessous et sur ce que tu sais du marché sénégalais ; donne des estimations claires et dis qu\'elles sont à vérifier. ':'Utilise seulement ses données ci-dessous. ')+
+      'N\'invente aucun chiffre sur ses finances et ne propose aucun placement risqué. Si les données ne suffisent pas, dis ce qu\'il faut ajouter.\n\nQuestion : '+q+'\n\n'+d;
+    var out=await SAMPLE(pr,{modelTier:'default'});
+    var txt=String(out&&out.text||'').trim();
+    if(!txt)throw new Error('vide');
+    ui.qa=[{q:long?'Idées de produits à acheter en Chine':q,a:txt}].concat(ui.qa||[]).slice(0,4);ui.qText='';
+  }catch(e){ui.qErr=(e&&e.msg)||(e&&e.code==='rate_limited'?'Trop d\'essais. Réessaie plus tard.':'L\'IA n\'a pas pu répondre. Réessaie dans un moment.')}
+  ui.qBusy=false;if(ui.tab==='coach')render(false);
+}
 function askCard(){
-  var h='<section class="sec"><h2>Pose ta question</h2><p class="sub">Demande ce que tu veux sur ton argent, tes habitudes ou tes projets.</p><div class="card">'+
+  var h='<section class="sec" id="ask-sec"><h2>Pose ta question</h2><p class="sub">Demande ce que tu veux sur ton argent, tes habitudes ou tes projets.</p><div class="card">'+
     '<textarea class="in" id="ai-q" rows="3" maxlength="400" placeholder="Ex : combien puis-je mettre de côté ce mois-ci ?" style="width:100%;resize:none;box-sizing:border-box">'+esc(ui.qBusy?ui.qText:'')+'</textarea>'+
     '<button type="button" class="btn" style="margin-top:12px;width:100%" data-act="ask"'+(ui.qBusy?' disabled':'')+'>'+(ui.qBusy?'L\'IA réfléchit…':'Envoyer')+'</button>';
   if(ui.qErr)h+='<p class="sm" role="alert" style="color:var(--bad);margin:12px 0 0">'+esc(ui.qErr)+'</p>';
@@ -1048,7 +1136,7 @@ function viewCoach(){
     {n:'Besoins',p:55,c:'var(--c-jour)',a:act(G.bes)},
     {n:'Envies',p:20,c:'var(--c-hab)',a:act(G.env)},
     {n:'Épargne',p:15,c:'var(--c-bud)',a:act(G.ep)},
-    {n:'Projets',p:10,c:'var(--c-proj)',a:null}
+    {n:'Projets',p:10,c:'var(--c-proj)',a:act(['Marchandises'])}
   ];
   html+='<section class="sec"><h2>Comment répartir ton argent</h2><p class="sub">Un repère pour '+fmt(dg.base)+' de revenu. Dépensé ce mois-ci sur prévu.</p>'+
     '<div class="card"><div class="plan" role="img" aria-label="Répartition conseillée : besoins 55 %, envies 20 %, épargne 15 %, projets 10 %">'+P.map(function(x){return '<i style="width:'+x.p+'%;background:'+x.c+'"></i>'}).join('')+'</div>'+
@@ -1192,20 +1280,10 @@ var ACTS={
     }
     try{var r=Notification.requestPermission(after);if(r&&r.then)r.then(after)}catch(e){toast('Notifications indisponibles ici')}
   },
-  ask:async function(){
-    if(!SAMPLE||ui.qBusy)return;
+  ask:function(){
     var el=document.getElementById('ai-q'),q=el?el.value.trim():'';
     if(q.length<3){toast('Écris ta question');return}
-    ui.qBusy=true;ui.qErr='';ui.qText=q;render(false);
-    try{
-      var p=aiPrompt(DIAG||diagnose()),i=p.indexOf('Données :\n'),d=i>=0?p.slice(i):'';
-      var pr='Tu es le coach personnel de '+(A().name||'l\'utilisateur')+'. Les montants sont en F CFA. Réponds à sa question en français simple, en le tutoyant, en 8 phrases maximum, en utilisant seulement ses données ci-dessous. N\'invente aucun chiffre et ne propose aucun placement risqué. Si les données ne suffisent pas, dis ce qu\'il faut ajouter.\n\nQuestion : '+q+'\n\n'+d;
-      var out=await SAMPLE(pr,{modelTier:'default'});
-      var txt=String(out&&out.text||'').trim();
-      if(!txt)throw new Error('vide');
-      ui.qa=[{q:q,a:txt}].concat(ui.qa||[]).slice(0,4);ui.qText='';
-    }catch(e){ui.qErr=(e&&e.msg)||(e&&e.code==='rate_limited'?'Trop d\'essais. Réessaie plus tard.':'L\'IA n\'a pas pu répondre. Réessaie dans un moment.')}
-    ui.qBusy=false;if(ui.tab==='coach')render(false);
+    askAI(q,false);
   },
   hide:function(){HIDE=!HIDE;nfSet('suivi:hide',HIDE?'1':'0');render(false);toast(HIDE?'Montants masqués':'Montants affichés')},
   aisave:function(){
@@ -1288,6 +1366,39 @@ var ACTS={
     ui.viewMonth=nk;ensureMonth(nk);
   },
   pf:function(b){ui.pf=Number(b.dataset.v);ui.open=null;render(false)},
+  sopen:function(b){
+    var was=ui.sopen===b.dataset.id;
+    ui.sopen=was?null:b.dataset.id;ui.sopening=was?null:b.dataset.id;
+    render(false);
+  },
+  sstage:function(b){
+    var x=S().find(function(z){return z.id===b.dataset.id});
+    if(x){x.st=Number(b.dataset.v);touch('app');toast(x.n+' : '+STOCK_ST[x.st])}
+    render(false);
+  },
+  ssell:function(b){
+    var x=S().find(function(z){return z.id===b.dataset.id});if(!x)return;
+    var c=sc(x),n=Math.min(num(b.dataset.n),c.left);
+    if(n<1)return;
+    if(!x.p){toast('Fixe d\'abord le prix de vente');return}
+    x.sold=(x.sold||0)+n;
+    var today=T(),k=mk(today);load('m-'+k);
+    M(k).tx.push({id:uid(),d:today,k:'rev',c:'Client',a:n*x.p,n:'Vente : '+x.n+' ×'+n});
+    touch('m-'+k);touch('app');
+    render(false);toast(n+' vendue'+(n>1?'s':'')+' : +'+fmt(n*x.p));
+    if(x.sold>=x.q)burstFrom(b.getBoundingClientRect(),14);
+  },
+  sdel:function(b,prev){
+    var k='sdel:'+b.dataset.id;
+    if(prev===k){var a=A();a.stock=S().filter(function(z){return z.id!==b.dataset.id});touch('app');ui.sopen=null;toast('Supprimé. Les opérations restent dans Budget.')}
+    else ui.confirm=k;
+    render(false);
+  },
+  askprod:function(){
+    if(!SAMPLE){toast('Ajoute d\'abord le serveur IA dans l\'onglet Coach');return}
+    ACTS.tab({dataset:{v:'coach'}});
+    askAI('Je veux acheter des produits en Chine pour les revendre à Dakar. Avec mon budget et mes achats déjà faits, quels produits me conseilles-tu d\'acheter en premier ? Donne 4 idées. Pour chacune : le prix d\'achat estimé par pièce, le prix de revente possible en F CFA, le risque, et une quantité de départ adaptée à mon argent. Rappelle-moi de vérifier les prix réels chez les fournisseurs et les frais de douane.',true);
+  },
   popen:function(b){
     var wasOpen=ui.open===b.dataset.id;
     ui.open=wasOpen?null:b.dataset.id;
@@ -1358,6 +1469,16 @@ main.addEventListener('submit',function(e){
     if(k!==ui.viewMonth&&k<=mk(T())){ui.viewMonth=k}
     ui.fresh='tx:'+xid;ui.focus='tx-amount';render(false);
     toast(ui.txType==='rev'?'Revenu ajouté':'Dépense ajoutée');
+  }else if(f==='stock'){
+    var sn=$('st-n').value.trim(),sq=num($('st-q').value),su=num($('st-u').value),sf=num($('st-f').value),sp=num($('st-p').value);
+    if(!sn){$('st-n').focus();return}
+    if(!sq||!su){toast('Indique la quantité et le prix d\'achat');return}
+    var sid=uid(),today=T(),smk=mk(today),stot=sq*su+sf;
+    load('m-'+smk);
+    M(smk).tx.push({id:uid(),d:today,k:'dep',c:'Marchandises',a:stot,n:'Achat : '+sn});
+    S().push({id:sid,n:sn,q:sq,u:su,f:sf,p:sp,sold:0,st:0,d:today});
+    touch('m-'+smk);touch('app');
+    ui.fresh='stock:'+sid;ui.focus='st-n';render(false);toast('Achat noté : '+fmt(stot)+' ajoutés aux dépenses');
   }else if(f==='goal'){
     var t=num($('goal-target').value);if(!t)return;
     var g=A().goal;g.n=$('goal-name').value.trim();g.t=t;touch('app');render(true);toast('Objectif fixé');
@@ -1379,6 +1500,11 @@ main.addEventListener('input',function(e){
 });
 main.addEventListener('change',function(e){
   var t=e.target;
+  if(t.dataset.in==='sp'){
+    var sx=S().find(function(z){return z.id===t.dataset.id});
+    if(sx){sx.p=num(t.value);touch('app');render(false)}
+    return;
+  }
   if(t.dataset.in==='income'){
     var v=num(t.value),m=M(ui.viewMonth);
     m.inc=v;A().income=v;touch('m-'+ui.viewMonth);touch('app');render(false);

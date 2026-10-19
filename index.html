@@ -1157,7 +1157,7 @@ function viewCoach(){
   var att=dg.items.filter(function(x){return x.l==='bad'||x.l==='warn'}).sort(function(p,q){return (p.l==='bad'?0:1)-(q.l==='bad'?0:1)});
   var okk=dg.items.filter(function(x){return x.l==='ok'});
   var inf=dg.items.filter(function(x){return x.l==='info'});
-  var html=hero+nfCard()+lkCard()+cdCard()+bkCard();
+  var html=hero+nfCard()+lkCard()+cdCard();
   html+='<section class="sec"><div class="grp"><h2>À corriger</h2><span class="cnt">'+att.length+'</span></div>'+(att.length?'<div style="margin-top:8px">'+insList(att,0)+'</div>':'<div class="empty">Rien d\'anormal pour l\'instant.</div>')+'</section>';
   if(okk.length)html+='<section class="sec"><div class="grp"><h2>Normal</h2><span class="cnt">'+okk.length+'</span></div><div style="margin-top:8px">'+insList(okk,att.length)+'</div></section>';
   if(inf.length)html+='<section class="sec"><div class="grp"><h2>Conseils</h2><span class="cnt">'+inf.length+'</span></div><div style="margin-top:8px">'+insList(inf,att.length+okk.length)+'</div></section>';
@@ -1300,24 +1300,22 @@ function nfCard(){
   return h+'</section>';
 }
 
-/* ---------- sauvegarde en ligne chiffrée (via ton serveur) + fichier ---------- */
-var CD={keys:{},timer:null,busy:false};
+/* ---------- compte (e-mail + mot de passe) : sauvegarde chiffrée automatique ---------- */
+var CD={timer:null,busy:false,pending:false};
 function cdAvail(){return !(window.claude&&window.claude.use)}
 function cdUrl(){return nfGet('suivi:aiurl')||''}
 function cdState(){return lsGet('cloud')}
-function cdNorm(c){return String(c||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
-function cdGen(){
-  var A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',r=crypto.getRandomValues(new Uint8Array(12)),o='',i;
-  for(i=0;i<12;i++){o+=A[r[i]%32];if(i%4===3&&i<11)o+='-'}
-  return o;
+function cdOn(){var c=cdState();return !!(c&&c.kb&&c.email)}
+function cdMail(e){return String(e||'').trim().toLowerCase()}
+async function cdDerive(email,pw){
+  var enc=new TextEncoder(),km=await crypto.subtle.importKey('raw',enc.encode(cdMail(email)+'\n'+pw),'PBKDF2',false,['deriveBits']);
+  var bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode('mon-suivi-compte-v1'),iterations:200000,hash:'SHA-256'},km,512);
+  return lkB64(bits);
 }
-async function cdKeys(code){
-  var n=cdNorm(code);if(CD.keys[n])return CD.keys[n];
-  var enc=new TextEncoder(),km=await crypto.subtle.importKey('raw',enc.encode(n),'PBKDF2',false,['deriveBits']);
-  var bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode('mon-suivi-sauvegarde-v1'),iterations:150000,hash:'SHA-256'},km,512);
-  var u=new Uint8Array(bits),key=await crypto.subtle.importKey('raw',u.slice(0,32),'AES-GCM',false,['encrypt','decrypt']);
+async function cdKeys(kb){
+  var u=lkUn(kb),key=await crypto.subtle.importKey('raw',u.slice(0,32),'AES-GCM',false,['encrypt','decrypt']);
   var id=Array.prototype.map.call(u.slice(32),function(b){return ('0'+b.toString(16)).slice(-2)}).join('');
-  return CD.keys[n]={key:key,id:id};
+  return {key:key,id:id};
 }
 function cdGather(){
   var docs={},i,k;
@@ -1339,57 +1337,81 @@ async function cdCall(body){
   if(!r.ok)throw new Error('http');
   return r.json();
 }
-async function cdPush(){
-  var c=cdState();if(!c||!c.code||!cdUrl())return false;
-  var K=await cdKeys(c.code),iv=crypto.getRandomValues(new Uint8Array(12));
-  var plain=new TextEncoder().encode(JSON.stringify({v:1,t:Date.now(),docs:cdGather()}));
-  var ct=await crypto.subtle.encrypt({name:'AES-GCM',iv:iv},K.key,plain);
-  await cdCall({op:'put',id:K.id,data:JSON.stringify({iv:lkB64(iv),c:lkB64(ct)})});
-  c.at=Date.now();lsSet('cloud',c);return true;
-}
-function cdSchedule(){
-  var c=cdState();if(!c||!c.code)return;
-  clearTimeout(CD.timer);
-  CD.timer=setTimeout(function(){cdPush().then(function(){if(ui.tab==='coach')render(false)}).catch(function(){})},6000);
-}
-async function cdFetch(code){
-  var K=await cdKeys(code),j=await cdCall({op:'get',id:K.id});
-  if(!j.data)throw new Error('none');
+async function cdRemote(kb){
+  var K=await cdKeys(kb),j=await cdCall({op:'get',id:K.id});
+  if(!j.data)return null;
   var o=JSON.parse(j.data),pt;
   try{pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:lkUn(o.iv)},K.key,lkUn(o.c))}catch(e){throw new Error('code')}
   return JSON.parse(new TextDecoder().decode(pt));
 }
+async function cdPush(){
+  var c=cdState();if(!c||!c.kb||!cdUrl())return false;
+  var K=await cdKeys(c.kb),iv=crypto.getRandomValues(new Uint8Array(12)),t=Date.now();
+  var plain=new TextEncoder().encode(JSON.stringify({v:1,t:t,docs:cdGather()}));
+  var ct=await crypto.subtle.encrypt({name:'AES-GCM',iv:iv},K.key,plain);
+  setSync('saving');
+  try{await cdCall({op:'put',id:K.id,data:JSON.stringify({iv:lkB64(iv),c:lkB64(ct)})})}catch(e){setSync('err');throw e}
+  c.at=t;lsSet('cloud',c);CD.pending=false;setSync('ok');return true;
+}
+function cdSchedule(){
+  if(!cdOn())return;CD.pending=true;
+  clearTimeout(CD.timer);
+  CD.timer=setTimeout(function(){cdPush().then(function(){if(ui.tab==='coach')render(false)}).catch(function(){})},4000);
+}
+async function cdPull(manual){
+  var c=cdState();if(!c||!c.kb||!cdUrl()||CD.busy||(CD.pending&&!manual))return;
+  try{
+    var r=await cdRemote(c.kb);
+    if(!r){setSync('ok');return}
+    if(r.t>(c.at||0)){
+      cdApply(r.docs||{});Object.keys(DOCS).forEach(function(k){delete DOCS[k]});dirty.clear();CD.pending=false;
+      c.at=r.t;lsSet('cloud',c);setSync('ok');render(false);toast('Données mises à jour');
+    }else setSync('ok');
+  }catch(e){setSync('err')}
+}
+function cdInit(){
+  if(!cdOn())return;
+  setTimeout(function(){setSync('ok');cdPull()},900);
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')cdPull()});
+  setInterval(function(){if(document.visibilityState==='visible')cdPull()},90000);
+}
 function cdMsg(e){
   var m=e&&e.message;
-  return m==='url'?'Enregistre d\'abord l\'adresse du serveur (section Avis de l\'IA).':
-    m==='net'?'Le serveur est introuvable. Vérifie ta connexion.':
+  return m==='url'?'Indique d\'abord l\'adresse du serveur.':
+    m==='net'?'Le serveur est introuvable. Vérifie ta connexion et l\'adresse du serveur.':
     m==='kv'?'Le serveur n\'a pas la sauvegarde. Sur Cloudflare, ajoute le binding KV nommé SYNC.':
-    m==='none'?'Aucune sauvegarde trouvée avec ce code.':
-    m==='code'?'Code incorrect.':
-    'La sauvegarde a échoué. Réessaie.';
+    m==='code'?'Données illisibles avec ce mot de passe.':
+    m&&m.charAt(0)==='!'?m.slice(1):
+    'La connexion a échoué. Réessaie.';
+}
+function cdSave(){
+  var g=function(id){var e=document.getElementById(id);return e?e.value:''};
+  ui.cdv={srv:g('cd-srv'),mail:g('cd-mail'),pw:g('cd-pw'),pw2:g('cd-pw2')};
 }
 function cdDate(t){return t?new Date(t).toLocaleString('fr-FR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'jamais'}
 function cdCard(){
   if(!cdAvail())return '';
-  var c=cdState(),on=!!(c&&c.code),url=!!cdUrl();
-  var h='<section class="sec"><h2>Sauvegarde en ligne</h2><div class="card">';
+  var c=cdState(),on=cdOn(),url=!!cdUrl(),up=ui.cdMode==='up',v=ui.cdv||{};
+  var h='<section class="sec"><h2>Mon compte</h2><div class="card">';
   if(on){
-    h+='<p class="sm" style="margin:0 0 12px"><b style="color:var(--ink)">Sauvegarde en ligne activée.</b> Tes données sont chiffrées avant de partir : seul ton code peut les lire. Dernière sauvegarde : '+cdDate(c.at)+'.</p>';
-    if(ui.cdShow)h+='<div class="cdcode" role="status">'+esc(c.code)+'</div><p class="sm" style="margin:0 0 12px">Note ce code en lieu sûr. Sans lui, personne ne peut retrouver tes données, même pas moi.</p>';
-    h+='<div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn"'+(CD.busy?' disabled':'')+' data-act="cdnow">'+(CD.busy?'Un instant…':'Sauvegarder')+'</button><button type="button" class="btn ghost" data-act="cdshow">'+(ui.cdShow?'Cacher mon code':'Voir mon code')+'</button></div>'+
-      '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px"><button type="button" class="link" data-act="cdpull">Restaurer la sauvegarde</button><button type="button" class="link" data-act="cdoff">Désactiver</button></div>';
+    h+='<p class="sm" style="margin:0 0 4px"><b style="color:var(--ink)">Connecté</b> : '+esc(c.email)+'</p>'+
+      '<p class="sm" style="margin:0 0 12px">Tes données se sauvegardent toutes seules et se mettent à jour sur tes autres appareils quand tu ouvres l\'application. Dernière synchronisation : '+cdDate(c.at)+'.</p>'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="btn"'+(CD.busy?' disabled':'')+' data-act="cdnow">'+(CD.busy?'Un instant…':'Synchroniser')+'</button><button type="button" class="btn ghost" data-act="cdlogout">Me déconnecter</button></div>'+
+      '<p class="sm" style="margin:14px 0 0">Tes données sont chiffrées avec ton mot de passe. Si tu l\'oublies, personne ne peut les retrouver.</p>';
   }else{
-    h+='<p class="sm" style="margin:0 0 12px">Sans sauvegarde, tes données restent seulement sur ce téléphone. Si tu changes de téléphone ou si tu effaces Safari, tout est perdu.</p>';
-    if(url){
-      h+='<button type="button" class="btn" style="width:100%"'+(CD.busy?' disabled':'')+' data-act="cdon">'+(CD.busy?'Un instant…':'Activer la sauvegarde en ligne')+'</button>'+
-        '<p class="sm" style="margin:16px 0 8px">Tu as déjà un code (nouveau téléphone) ?</p>'+
-        '<div class="aiurl"><input class="in" id="cd-code" autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX-XXXX"><button type="button" class="btn ghost" data-act="cdrestore">Restaurer</button></div>';
-    }else h+='<p class="sm" style="margin:0 0 4px">Pour la sauvegarde en ligne, enregistre d\'abord l\'adresse du serveur dans la section « Avis de l\'IA ».</p>';
+    h+='<p class="sm" style="margin:0 0 12px">Connecte-toi avec ton e-mail pour retrouver tes données sur tous tes appareils. Sans compte, elles restent seulement sur cet appareil.</p>'+
+      '<div class="chips" style="margin-bottom:12px"><button type="button" class="chip" data-act="cdmode" data-v="in" aria-pressed="'+(!up)+'">Me connecter</button><button type="button" class="chip" data-act="cdmode" data-v="up" aria-pressed="'+up+'">Créer mon compte</button></div>'+
+      '<div class="form">'+
+      (url?'':'<label class="fld"><span>Adresse du serveur (workers.dev)</span><input class="in" id="cd-srv" inputmode="url" autocapitalize="off" autocomplete="off" placeholder="https://….workers.dev" value="'+esc(v.srv||'')+'"></label>')+
+      '<label class="fld"><span>E-mail</span><input class="in" id="cd-mail" type="email" inputmode="email" autocapitalize="off" autocomplete="email" placeholder="toi@gmail.com" value="'+esc(v.mail||'')+'"></label>'+
+      '<label class="fld"><span>Mot de passe</span><input class="in" id="cd-pw" type="password" autocomplete="'+(up?'new-password':'current-password')+'" placeholder="8 caractères minimum" value="'+esc(v.pw||'')+'"></label>'+
+      (up?'<label class="fld"><span>Répète le mot de passe</span><input class="in" id="cd-pw2" type="password" autocomplete="new-password" value="'+esc(v.pw2||'')+'"></label>':'')+
+      '<button type="button" class="btn" style="width:100%"'+(CD.busy?' disabled':'')+' data-act="'+(up?'cdsignup':'cdsignin')+'">'+(CD.busy?'Un instant…':(up?'Créer mon compte':'Me connecter'))+'</button></div>';
   }
   if(ui.cdErr)h+='<p class="sm" role="alert" style="color:var(--bad);margin:12px 0 0">'+esc(ui.cdErr)+'</p>';
-  h+='</div></section>';
-  return h;
+  return h+'</div></section>';
 }
+cdInit();
 
 /* ---------- verrouillage Face ID (WebAuthn, local) ---------- */
 var LK={ok:!!(window.PublicKeyCredential&&window.top===window&&navigator.credentials),hiddenAt:0};
@@ -1516,38 +1538,50 @@ var ACTS={
     if(ok){toast('Sauvegarde prête');render(false)}
   },
   bkimp:function(){var el=document.getElementById('bk-file');if(el)el.click()},
-  cdshow:function(){ui.cdShow=!ui.cdShow;render(false)},
-  cdon:async function(){
-    if(CD.busy)return;CD.busy=true;ui.cdErr='';render(false);
-    try{lsSet('cloud',{code:cdGen(),at:0});await cdPush();ui.cdShow=true;toast('Sauvegarde activée')}
-    catch(e){lsSet('cloud',null);ui.cdErr=cdMsg(e)}
+  cdmode:function(b){cdSave();ui.cdMode=b.dataset.v;ui.cdErr='';render(false)},
+  cdsignup:async function(){
+    if(CD.busy)return;cdSave();
+    var $=function(id){var e=document.getElementById(id);return e?e.value:''};
+    var mail=cdMail($('cd-mail')),pw=$('cd-pw'),pw2=$('cd-pw2'),srv=$('cd-srv').trim();
+    ui.cdErr='';
+    if(srv){if(!/^(https:\/\/|http:\/\/localhost)[^\s]+$/i.test(srv)){ui.cdErr='L\'adresse du serveur commence par https://';render(false);return}nfSet('suivi:aiurl',srv);SAMPLE=aiShim()}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)){ui.cdErr='Écris une adresse e-mail valide.';render(false);return}
+    if(pw.length<8){ui.cdErr='Le mot de passe a au moins 8 caractères.';render(false);return}
+    if(pw!==pw2){ui.cdErr='Les deux mots de passe sont différents.';render(false);return}
+    CD.busy=true;render(false);
+    try{
+      var kb=await cdDerive(mail,pw);
+      if(await cdRemote(kb))throw new Error('!Ce compte existe déjà. Utilise « Me connecter ».');
+      lsSet('cloud',{email:mail,kb:kb,at:0});
+      await cdPush();cdInit();ui.cdv=null;toast('Compte créé');
+    }catch(e){lsSet('cloud',null);ui.cdErr=cdMsg(e)}
+    CD.busy=false;render(false);
+  },
+  cdsignin:async function(){
+    if(CD.busy)return;cdSave();
+    var $=function(id){var e=document.getElementById(id);return e?e.value:''};
+    var mail=cdMail($('cd-mail')),pw=$('cd-pw'),srv=$('cd-srv').trim();
+    ui.cdErr='';
+    if(srv){if(!/^(https:\/\/|http:\/\/localhost)[^\s]+$/i.test(srv)){ui.cdErr='L\'adresse du serveur commence par https://';render(false);return}nfSet('suivi:aiurl',srv);SAMPLE=aiShim()}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)||!pw){ui.cdErr='Écris ton e-mail et ton mot de passe.';render(false);return}
+    CD.busy=true;render(false);
+    try{
+      var kb=await cdDerive(mail,pw),r=await cdRemote(kb);
+      if(!r)throw new Error('!Aucun compte avec cet e-mail et ce mot de passe.');
+      if(Object.keys(cdGather()).length&&!window.confirm('Remplacer les données de cet appareil par celles de ton compte ?')){CD.busy=false;render(false);return}
+      cdApply(r.docs||{});lsSet('cloud',{email:mail,kb:kb,at:r.t||Date.now()});
+      toast('Connecté');setTimeout(function(){location.reload()},500);return;
+    }catch(e){ui.cdErr=cdMsg(e)}
     CD.busy=false;render(false);
   },
   cdnow:async function(){
     if(CD.busy)return;CD.busy=true;ui.cdErr='';render(false);
-    try{await cdPush();toast('Sauvegardé')}catch(e){ui.cdErr=cdMsg(e)}
+    try{await cdPull(true);if(CD.pending)await cdPush();toast('Synchronisé')}catch(e){ui.cdErr=cdMsg(e)}
     CD.busy=false;render(false);
   },
-  cdrestore:async function(){
-    var el=document.getElementById('cd-code'),code=el?el.value:'';
-    if(cdNorm(code).length!==12){ui.cdErr='Le code a 12 lettres et chiffres.';render(false);return}
-    if(CD.busy)return;CD.busy=true;ui.cdErr='';render(false);
-    try{
-      var d=await cdFetch(code);
-      cdApply(d.docs||{});lsSet('cloud',{code:cdNorm(code).replace(/(.{4})(?=.)/g,'$1-'),at:d.t||Date.now()});
-      toast('Données restaurées');setTimeout(function(){location.reload()},500);return;
-    }catch(e){ui.cdErr=cdMsg(e)}
-    CD.busy=false;render(false);
-  },
-  cdpull:async function(){
-    var c=cdState();if(!c||!c.code)return;
-    if(!window.confirm('Remplacer les données de ce téléphone par la dernière sauvegarde ?'))return;
-    try{var d=await cdFetch(c.code);cdApply(d.docs||{});toast('Données restaurées');setTimeout(function(){location.reload()},500)}
-    catch(e){ui.cdErr=cdMsg(e);render(false)}
-  },
-  cdoff:function(){
-    if(!window.confirm('Désactiver la sauvegarde en ligne ? Tes données restent sur ce téléphone.'))return;
-    lsSet('cloud',null);ui.cdShow=false;toast('Sauvegarde désactivée');render(false);
+  cdlogout:function(){
+    if(!window.confirm('Te déconnecter ? Les données restent sur cet appareil.'))return;
+    lsSet('cloud',null);ui.cdErr='';setSync('local');toast('Déconnecté');render(false);
   },
   lkon:async function(){
     try{await lkEnable();toast('Verrouillage activé')}catch(e){toast('Activation annulée')}
